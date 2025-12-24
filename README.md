@@ -67,5 +67,3 @@ Response: {
 - The server fetches content from the knowledge base URL on each request
 - Conversation history is limited to the last 10 messages to manage token usage
 - The knowledge base content is limited to 5000 characters to avoid token limits
-
-
