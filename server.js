@@ -10,8 +10,9 @@ import { scrapeAllPages, scrapeListingProducts } from "./utils/websiteScraper.js
 import { resolveIntent, inferConversationStage } from "./utils/intentMapper.js";
 import { scrapeEntireWebsite } from "./utils/comprehensiveScraper.js";
 // Embedding service re-enabled with optimizations
-import { indexContent, getRelevantContent, needsUpdate } from "./utils/embeddingService.js";
+import { indexContent, indexProductChunks, getRelevantContent, needsUpdate } from "./utils/embeddingService.js";
 import { trackConversationState, getStagePrompt, generateGuidingQuestion, suggestQuickReplies } from "./utils/conversationManager.js";
+import { loadProductsFromJSON, productsToTextChunks } from "./utils/productLoader.js";
 
 dotenv.config();
 
@@ -92,9 +93,8 @@ app.post("/api/chat", async (req, res) => {
 
     console.log(`Processing chat request: "${message.substring(0, 50)}..."`);
 
-    // Fetch website content with timeout - use cached/scraped content
+    // Load products from JSON file instead of scraping/API
     const baseUrl = process.env.KNOWLEDGE_BASE_URL || "https://shop.skysecure.ai/";
-    let combinedWebsiteContent = "";
     let relevantContent = "";
     
     // DYNAMIC: resolveIntent is now async - await it
@@ -107,85 +107,41 @@ app.post("/api/chat", async (req, res) => {
     const stagePrompt = getStagePrompt(conversationState.stage, conversationState.context);
     const quickReplies = suggestQuickReplies(conversationState.stage, intentInfo);
 
-    try {
-      // Try to get comprehensive content (may be cached)
-      console.log("Fetching website content...");
-      const comprehensiveWebsiteContent = await Promise.race([
-        scrapeEntireWebsite(baseUrl),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Scrape timeout")), 30000)) // 30s timeout
+    // Load products from JSON file
+    console.log("Loading products from products_normalized.json...");
+    const productsFromJSON = await loadProductsFromJSON();
+    
+    // Index products with embeddings for semantic search
+    if (productsFromJSON.length > 0 && needsUpdate()) {
+      console.log("Indexing products with embeddings for semantic search...");
+      const productChunks = productsToTextChunks(productsFromJSON);
+      await Promise.race([
+        indexProductChunks(productChunks),
+        new Promise((resolve) => setTimeout(() => resolve(), 30000)) // 30s timeout for indexing
       ]).catch(err => {
-        console.warn("Comprehensive scrape timed out or failed, using fallback:", err.message);
-        return "";
+        console.warn("Product indexing failed, continuing without semantic search:", err.message);
       });
-
-      // Get specific pages (faster)
-      const specificPagesContent = await Promise.race([
-        scrapeAllPages(baseUrl),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Scrape timeout")), 15000)) // 15s timeout
-      ]).catch(err => {
-        console.warn("Specific pages scrape timed out:", err.message);
-        return "";
-      });
-
-      combinedWebsiteContent = (comprehensiveWebsiteContent || "") + "\n\n" + (specificPagesContent || "");
-      console.log(`Combined website content length: ${combinedWebsiteContent.length} characters`);
-
-      // Embedding indexing RE-ENABLED with optimizations
-      // Index content only if cache needs update (1 hour TTL)
-      if (combinedWebsiteContent && needsUpdate()) {
-        console.log("Indexing website content with embeddings (cache expired)...");
-        await Promise.race([
-          indexContent(combinedWebsiteContent),
-          new Promise((resolve) => setTimeout(() => resolve(), 10000)) // 10s timeout for indexing
-        ]).catch(err => {
-          console.warn("Indexing failed, continuing without semantic search:", err.message);
-        });
-      } else if (combinedWebsiteContent) {
-        console.log("Using cached embeddings (no re-indexing needed)");
-      }
-
-      // Get relevant content using semantic search (with timeout)
-      if (combinedWebsiteContent) {
-        console.log("Finding relevant content using semantic search...");
-        relevantContent = await Promise.race([
-          getRelevantContent(message, 5), // Reduced to 5 chunks for performance
-          new Promise((resolve) => setTimeout(() => resolve(""), 5000)) // 5s timeout
-        ]).catch(err => {
-          console.warn("Semantic search failed:", err.message);
-          return "";
-        });
-        console.log(`Semantic search returned ${relevantContent.length} characters of relevant content`);
-      }
-    } catch (error) {
-      console.error("Error fetching website content:", error.message);
-      console.error("Error stack:", error.stack);
-      // Ensure combinedWebsiteContent is always a string
-      combinedWebsiteContent = combinedWebsiteContent || "";
-      // Continue with product data even if website scraping fails
+    } else if (productsFromJSON.length > 0) {
+      console.log("Using cached product embeddings (no re-indexing needed)");
     }
 
-    // Fetch real product data from API (pass website content for fallback matching)
-    console.log("Fetching product data from API...");
-    let products = [];
+    // Get relevant content using semantic search on products
+    if (productsFromJSON.length > 0) {
+      console.log("Finding relevant products using semantic search...");
+      relevantContent = await Promise.race([
+        getRelevantContent(message, 10), // Get top 10 relevant products
+        new Promise((resolve) => setTimeout(() => resolve(""), 5000)) // 5s timeout
+      ]).catch(err => {
+        console.warn("Semantic search failed:", err.message);
+        return "";
+      });
+      console.log(`Semantic search returned ${relevantContent.length} characters of relevant content`);
+    }
+
+    // Use products loaded from JSON file
+    console.log("Using products from JSON file...");
+    let products = productsFromJSON || [];
     let productFetchError = null;
-
-    try {
-      // Ensure combinedWebsiteContent is a string before passing
-      const websiteContentForProducts = typeof combinedWebsiteContent === 'string' ? combinedWebsiteContent : "";
-      console.log(`Passing website content to product fetcher: ${websiteContentForProducts.length} characters`);
-
-      // Pass website content to product fetcher for fallback matching
-      // Increased timeout to 90 seconds to allow all API calls to complete
-      products = await Promise.race([
-        fetchAllProducts(websiteContentForProducts, intentInfo),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Product API timeout")), 90000)) // 90s timeout
-      ]);
-    } catch (error) {
-      console.error("Error fetching products:", error.message);
-      console.error("Error stack:", error.stack);
-      productFetchError = error.message;
-      products = []; // Ensure products is an array
-    }
 
     console.log(`\n${'='.repeat(80)}`);
     console.log(`📊 PRODUCTS RETRIEVED FOR KNOWLEDGE BASE`);
@@ -300,157 +256,11 @@ app.post("/api/chat", async (req, res) => {
       categoryHierarchy = "\n=== MARKETPLACE CATEGORY HIERARCHY ===\nUnable to fetch category hierarchy from API at this time.\n=== END CATEGORY HIERARCHY ===\n\n";
     }
 
-    // NOTE: productKnowledgeBase will be created AFTER scraping to include scraped products
+    // Skip website scraping - using products from JSON file instead
     let listingProductsSection = "";
+    console.log("✅ Using products from JSON file - skipping website scraping to avoid timeouts");
     
-    // CRITICAL: HTML/DOM is PRIMARY source of truth - Always scrape listing pages
-    try {
-      const urlsToScrape = [];
-      
-      // Always include intent-based URLs
-      if (intentInfo && intentInfo.listingUrls && intentInfo.listingUrls.length > 0) {
-        urlsToScrape.push(...intentInfo.listingUrls);
-      }
-      
-      // If SQL/Data Management is detected, scrape that page
-      if (intentInfo && intentInfo.categoryName === "Data Management") {
-        const dataMgmtUrl = `https://shop.skysecure.ai/products?subCategoryId=${intentInfo.subCategoryId}&subCategory=Data-Management`;
-        if (!urlsToScrape.includes(dataMgmtUrl)) {
-          urlsToScrape.push(dataMgmtUrl);
-        }
-        console.log(`🔍 Scraping Data Management page for SQL products: ${dataMgmtUrl}`);
-      }
-      
-      // CRITICAL: Always scrape main products page to find ALL products (including SQL)
-      // This ensures we don't miss products that might not be in specific category pages
-      const mainProductsUrl = 'https://shop.skysecure.ai/products';
-      if (!urlsToScrape.includes(mainProductsUrl)) {
-        urlsToScrape.push(mainProductsUrl);
-        console.log(`🔍 Always scraping main products page: ${mainProductsUrl}`);
-      }
-      
-      // Also scrape homepage which might have featured products
-      const homepageUrl = 'https://shop.skysecure.ai/';
-      if (!urlsToScrape.includes(homepageUrl)) {
-        urlsToScrape.push(homepageUrl);
-        console.log(`🔍 Also scraping homepage for featured products: ${homepageUrl}`);
-      }
-      
-      console.log(`\n${'='.repeat(80)}`);
-      console.log(`🌐 SCRAPING LISTING PAGES (PRIMARY SOURCE OF TRUTH)`);
-      console.log(`${'='.repeat(80)}`);
-      console.log(`URLs to scrape: ${urlsToScrape.length}`);
-      urlsToScrape.forEach((url, idx) => {
-        console.log(`  ${idx + 1}. ${url}`);
-      });
-      console.log(`${'='.repeat(80)}\n`);
-      
-      if (urlsToScrape.length > 0) {
-        const scrapedListing = await scrapeListingProducts(urlsToScrape);
-        
-        if (scrapedListing.length > 0) {
-          listingProductsSection += `\n=== PRODUCTS FROM LISTING PAGES (${scrapedListing.length} products) ===\n`;
-          listingProductsSection += `⚠️  CRITICAL: These products were scraped DIRECTLY from the website HTML/DOM.\n`;
-          listingProductsSection += `This is the PRIMARY source of truth. If API returns 0 products but this section has products, USE THESE PRODUCTS.\n\n`;
-          
-          scrapedListing.forEach((p, i) => {
-            listingProductsSection += `${i + 1}. **${p.name}**\n`;
-            listingProductsSection += `   ${p.name}\n`; // Duplicate for search results format
-            if (p.vendor && p.vendor !== 'Unknown Vendor') {
-              listingProductsSection += `   Vendor: ${p.vendor}\n`;
-            }
-            if (p.price && p.price > 0) {
-              const formattedPrice = typeof p.price === 'number' ? 
-                p.price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 
-                p.price;
-              listingProductsSection += `   Price: ₹${formattedPrice}${p.billingCycle ? ` / ${p.billingCycle}` : ''}\n`;
-            }
-            if (p.description) {
-              listingProductsSection += `   Description: ${p.description.substring(0, 150)}...\n`;
-            }
-            if (p.url) {
-              listingProductsSection += `   Link: ${p.url}\n`;
-            }
-            listingProductsSection += `\n`;
-          });
-          listingProductsSection += `=== END PRODUCTS FROM LISTING PAGES ===\n`;
-          console.log(`✅ Scraped ${scrapedListing.length} products from listing pages (PRIMARY SOURCE)`);
-          
-          // CRITICAL: Add scraped products to main products array (they take priority)
-          scrapedListing.forEach(scrapedProduct => {
-            if (!scrapedProduct.name) return;
-            
-            const existingIndex = products.findIndex(p => 
-              p.name && scrapedProduct.name && 
-              p.name.toLowerCase().trim() === scrapedProduct.name.toLowerCase().trim()
-            );
-            
-            if (existingIndex >= 0) {
-              // Update existing product with scraped data (scraped data is more reliable)
-              products[existingIndex] = {
-                ...products[existingIndex],
-                name: scrapedProduct.name,
-                vendor: scrapedProduct.vendor || products[existingIndex].vendor,
-                price: scrapedProduct.price > 0 ? scrapedProduct.price : products[existingIndex].price,
-                billingCycle: scrapedProduct.billingCycle || products[existingIndex].billingCycle,
-                description: scrapedProduct.description || products[existingIndex].description,
-                productUrl: scrapedProduct.url || products[existingIndex].productUrl,
-                source: 'SCRAPED_FROM_HTML' // Mark as scraped
-              };
-            } else {
-              // Add new product from scraping
-              products.push({
-                id: `scraped-${Buffer.from(scrapedProduct.name).toString('base64').substring(0, 20)}`,
-                name: scrapedProduct.name,
-                vendor: scrapedProduct.vendor || 'Unknown Vendor',
-                price: scrapedProduct.price || 0,
-                billingCycle: scrapedProduct.billingCycle || 'Monthly',
-                category: intentInfo?.categoryName || 'Software',
-                subCategory: intentInfo?.categoryName || 'General',
-                description: scrapedProduct.description || '',
-                isFeatured: false,
-                isTopSelling: false,
-                isLatest: false,
-                productUrl: scrapedProduct.url || '',
-                source: 'SCRAPED_FROM_HTML' // Mark as scraped
-              });
-            }
-          });
-          
-          console.log(`✅ Merged ${scrapedListing.length} scraped products into main list (Total: ${products.length})`);
-          
-          // CRITICAL: Check if any scraped products are SQL-related
-          const scrapedSqlProducts = scrapedListing.filter(p => {
-            const name = (p.name || '').toLowerCase();
-            const desc = (p.description || '').toLowerCase();
-            return name.includes('sql') || name.includes('database') || name.includes('server') ||
-                   desc.includes('sql') || desc.includes('database') || desc.includes('server') ||
-                   name.includes('microsoft sql') || name.includes('sql server');
-          });
-          
-          if (scrapedSqlProducts.length > 0) {
-            console.log(`\n🔍 CRITICAL: Found ${scrapedSqlProducts.length} SQL products in SCRAPED data:`);
-            scrapedSqlProducts.forEach((p, idx) => {
-              console.log(`   ${idx + 1}. ${p.name} (${p.vendor}) - ₹${p.price}/${p.billingCycle}`);
-            });
-            console.log(`   These products are now in the main products array and will be included in SQL PRODUCTS section.\n`);
-          }
-        } else {
-          console.warn(`⚠️  WARNING: No products scraped from listing pages: ${urlsToScrape.join(', ')}`);
-          console.warn(`   This may indicate:`);
-          console.warn(`   1. Website structure changed`);
-          console.warn(`   2. Products load via JavaScript that needs execution`);
-          console.warn(`   3. Selectors need updating`);
-          console.warn(`   4. Website requires authentication`);
-        }
-      }
-    } catch (error) {
-      console.error(`❌ Error scraping listing pages: ${error.message}`);
-      console.error(`   Stack: ${error.stack}`);
-      // Continue even if scraping fails - API products might still be available
-    }
-    
-    // Re-format knowledge base AFTER merging scraped products to ensure SQL products section includes scraped ones
+    // Re-format knowledge base with products from JSON
     const productKnowledgeBase = formatProductsForKnowledgeBase(products);
     console.log(`Product knowledge base created: ${productKnowledgeBase.length} characters`);
 
@@ -459,28 +269,19 @@ app.post("/api/chat", async (req, res) => {
 
 IMPORTANT: Format all responses in a visually appealing way using markdown. Use clear headings, bullet points, tables, bold text, and proper spacing to make responses easy to read and engaging.
 
-⚠️  CRITICAL DATA SOURCE RULES - PRIMARY SOURCE OF TRUTH: HTML/DOM ⚠️
+⚠️  CRITICAL DATA SOURCE RULES - PRODUCTS FROM JSON FILE ⚠️
 
-The website https://shop.skysecure.ai IS a product marketplace. Products DO EXIST and MUST be discovered.
+All products are loaded from products_normalized.json file. Products DO EXIST and MUST be discovered using semantic search.
 
-MANDATORY DATA FETCH RULES (PRIORITY ORDER):
-1. **PRIMARY SOURCE**: "PRODUCTS FROM LISTING PAGES" section - These are scraped DIRECTLY from HTML/DOM
-   - This section takes HIGHEST PRIORITY
-   - If this section has products, they EXIST regardless of API status
-   - These products were extracted from the actual website HTML
-2. **SECONDARY SOURCE**: API product data (SQL PRODUCTS, DATA MANAGEMENT PRODUCTS sections)
-3. DO NOT rely on category counters shown on landing pages or main category pages
-4. ALWAYS check products from filtered product listing URLs using:
-   - subCategoryId (e.g., /products?subCategoryId=*&subCategory=Data-Management)
-   - oemId (e.g., /products?oemId=*)
-   - sort parameters (e.g., /products?sort=*)
-5. A category is considered empty ONLY if:
-   - Scraped HTML from listing pages shows zero products
-   - AND no product cards, links, or references found in DOM
-   - AND API also returns zero products
-6. API failures, embedding failures, or timeouts MUST NEVER be used to say "no products exist"
-7. If products appear in "PRODUCTS FROM LISTING PAGES", they EXIST and MUST be listed
-8. DO NOT assume, infer, or hallucinate products - but DO trust scraped HTML content
+MANDATORY DATA FETCH RULES:
+1. **PRIMARY SOURCE**: Products loaded from products_normalized.json file
+   - All products are available in the product data sections below
+   - Use semantic search results to find relevant products
+2. **SEMANTIC SEARCH**: Use the "SEMANTIC SEARCH RESULTS" section to find products matching the user's query
+3. A category is considered empty ONLY if:
+   - No products found in the JSON file for that category
+   - AND semantic search returns no relevant products
+4. DO NOT assume, infer, or hallucinate products - use only the data from the JSON file
 
 PRODUCT PAGES TO TRAVERSE:
 - /products?subCategoryId=* (for subcategories)
@@ -489,25 +290,21 @@ PRODUCT PAGES TO TRAVERSE:
 
 BEHAVIOR RULES:
 1. PRIORITY ORDER for product data:
-   a) "PRODUCTS FROM LISTING PAGES" section (scraped from HTML - HIGHEST PRIORITY)
-   b) "SQL PRODUCTS" section (from API)
-   c) "DATA MANAGEMENT PRODUCTS" section (from API)
-   d) General product listings (from API)
-2. If products appear in "PRODUCTS FROM LISTING PAGES", they EXIST and MUST be listed
-3. If products exist on listing pages (scraped HTML), LIST THEM, even if API shows 0 products
+   a) "SEMANTIC SEARCH RESULTS" section (most relevant products for the query)
+   b) Category-specific sections in product data (e.g., "SQL PRODUCTS", "DATA MANAGEMENT PRODUCTS")
+   c) General product listings from JSON file
+2. Use semantic search results to find the most relevant products for the user's query
+3. If products exist in the JSON file, LIST THEM
 4. Say "No products found" ONLY if:
-   - Scraped HTML from listing pages shows zero products
-   - AND no product cards, links, or references found in DOM
-   - AND API also returns zero products
+   - Semantic search returns no results
+   - AND no products found in category-specific sections
+   - AND no products in general listings
 5. If a user asks about a specific category (e.g., Data Management), check:
-   - First: "PRODUCTS FROM LISTING PAGES" section
-   - Then: Category-specific sections in knowledge base
-6. Match the website structure exactly (Categories → Subcategories → Products)
-7. Show product name, vendor, pricing model, and license duration from scraped or API data
-8. Keep responses concise, factual, and aligned with the live marketplace data
-9. DO NOT add external explanations, recommendations, or examples unless explicitly asked
-10. ALWAYS prioritize scraped HTML content over API data when there's a conflict
-11. TRUST THE UI - if products appear in scraped HTML, they exist regardless of API status
+   - First: "SEMANTIC SEARCH RESULTS" section
+   - Then: Category-specific sections in product knowledge base
+6. Show product name, vendor, pricing model, and license duration from JSON data
+7. Keep responses concise, factual, and aligned with the product data from JSON file
+8. DO NOT add external explanations, recommendations, or examples unless explicitly asked
 
 RESPONSE FORMAT:
 When listing products, always include:
@@ -525,11 +322,11 @@ EXAMPLE BEHAVIOR:
 
 CRITICAL: You have access to:
 
-1. REAL, LIVE product data from the SkySecure API with actual names, prices, categories, vendors, descriptions
-2. COMPREHENSIVE website content scraped from ALL pages of https://shop.skysecure.ai/ (all pages crawled)
-3. Complete product information, descriptions, features, pricing, categories, and all website content
+1. REAL product data loaded from products_normalized.json with actual names, prices, categories, vendors, descriptions
+2. SEMANTIC SEARCH results that find the most relevant products based on the user's query
+3. Complete product information, descriptions, features, pricing, categories from the JSON file
 
-You MUST use this comprehensive data to answer ALL questions accurately. The website has been fully crawled and you have access to all the content. DO NOT make up or assume any information that is not in the data provided below.
+You MUST use this comprehensive data to answer ALL questions accurately. All products are loaded from the products_normalized.json file. DO NOT make up or assume any information that is not in the data provided below.
 
 CONVERSATION STATE: ${conversationStage}
 CONVERSATION STAGE (Guided Sales): ${conversationState.stage}
@@ -539,10 +336,7 @@ LISTING URLS: ${(intentInfo.listingUrls || []).join(', ')}
 
 ${stagePrompt}
 
-COMPLETE WEBSITE CONTENT (crawled from ALL pages of https://shop.skysecure.ai/):
-${combinedWebsiteContent}
-
-${relevantContent ? `SEMANTIC SEARCH RESULTS (Most relevant content for this query):
+${relevantContent ? `SEMANTIC SEARCH RESULTS (Most relevant products for this query):
 ${relevantContent}
 ` : ''}
 
@@ -554,7 +348,6 @@ ${categoryHierarchy}
 ${productKnowledgeBase}
 === END PRODUCT DATA ===
 
- ${listingProductsSection}
 
 IMPORTANT: The product data above contains clearly marked sections:
 - "=== RECENTLY ADDED PRODUCTS ===" section lists all recently added products
@@ -597,12 +390,11 @@ EXAMPLES:
 - User asks "best selling products" → Look for "=== TOP SELLING / BEST SELLING PRODUCTS ===" section. If it shows "(X products)" where X > 0, list ALL products from that section.
 - User asks "featured products" → Look for "=== FEATURED PRODUCTS ===" section. If it shows "(X products)" where X > 0, list ALL products from that section.
 - User asks "what are the SQL products being sold" or "SQL products" → Look for products in this EXACT order:
-  1. **FIRST**: Check "=== PRODUCTS FROM LISTING PAGES ===" section - These are scraped DIRECTLY from HTML/DOM
-     - This is the PRIMARY source of truth
-     - If products are here, they EXIST on the website
-     - Filter for products with "SQL" in the name
-  2. **SECOND**: Check "=== SQL PRODUCTS ===" section (from API)
-  3. **THIRD**: Check "=== DATA MANAGEMENT PRODUCTS ===" section (from API)
+  1. **FIRST**: Check "=== SEMANTIC SEARCH RESULTS ===" section - These are the most relevant products found via semantic search
+     - This is the PRIMARY source for finding relevant products
+     - Filter for products with "SQL" in the name or description
+  2. **SECOND**: Check "=== SQL PRODUCTS ===" section (from JSON file)
+  3. **THIRD**: Check "=== DATA MANAGEMENT PRODUCTS ===" section (from JSON file)
   
   If ANY of these sections show products, you MUST:
   * Create a "### Search Results" section
@@ -612,17 +404,16 @@ EXAMPLES:
     ₹Price / BillingCycle
   * Include ALL products from ALL sections that contain SQL products
   * DO NOT say "no products" if ANY section shows products
-  * If "PRODUCTS FROM LISTING PAGES" has products, prioritize those (they're from HTML)
+  * If "SEMANTIC SEARCH RESULTS" has products, prioritize those (they're most relevant)
   * Example format:
     **SQL Server Standard 2022- 2 Core License Pack - 1 year**
     SQL Server Standard 2022- 2 Core License Pack - 1 year
     ₹139,289.92 / Yearly
   
-  CRITICAL: If "PRODUCTS FROM LISTING PAGES" section exists and has products, those products EXIST on the website
-  regardless of what the API returns. NEVER say "no products" if scraped HTML shows products.
+  CRITICAL: Use semantic search results and product data from JSON file to find all relevant products.
 
 GENERAL INSTRUCTIONS:
-1. ALWAYS check the product data sections FIRST before saying something doesn't exist - specifically check filtered product listing URLs (subCategoryId, oemId) in the website content
+1. ALWAYS check the product data sections FIRST before saying something doesn't exist - use semantic search and category sections
 2. Use the EXACT product names, prices, and vendors from the data - DO NOT make up or assume any information - NEVER infer or assume availability
 3. Format prices as ₹{amount}/{billingCycle} (e.g., ₹66,599/Monthly) - use comma separators for thousands
 4. Include product descriptions when available in the data - ONLY if present in the data provided
@@ -662,7 +453,7 @@ GENERAL INSTRUCTIONS:
 CRITICAL: All data is fetched LIVE from the SkySecure Marketplace API. There are NO hard-coded responses. If data is missing, it means the API returned no data, and you must clearly communicate this to the user.
 
 ABSOLUTE GUARDRAILS:
-1. NEVER say "no products found" unless BOTH sources are empty: API products for the target scope AND scraped listing pages for the relevant subCategoryId/oemId return zero product cards.
+1. NEVER say "no products found" unless semantic search returns no results AND no products found in category sections.
 2. If the user intent maps to a broad category, ask one clarifying question to narrow to a subcategory or OEM before recommending.
 3. If intent is clear, recommend 1–2 products with reasoning and always include a direct Link for each product when available.
 4. Treat products parsed from listing pages as authoritative first-class data for availability.
@@ -678,8 +469,8 @@ MANDATORY CHECKLIST before answering:
 - Question about best selling products? → Check "=== TOP SELLING / BEST SELLING PRODUCTS ===" section
 - Question about recently added products? → Check "=== RECENTLY ADDED PRODUCTS ===" section
 - Question about SQL products? → Check in this order:
-  1. "=== PRODUCTS FROM LISTING PAGES ===" section FIRST (most reliable - scraped from actual website)
-  2. "=== SQL PRODUCTS ===" section (from API)
+  1. "=== SEMANTIC SEARCH RESULTS ===" section FIRST (most relevant products)
+  2. "=== SQL PRODUCTS ===" section (from JSON file)
   3. "=== DATA MANAGEMENT PRODUCTS ===" section
   If ANY of these sections show products, list ALL of them with name, vendor, price, and billing cycle
 - Question about email or collaboration products? → Check "=== EMAIL & COLLABORATION PRODUCTS ===" section FIRST, then "=== PRODUCTS FROM LISTING PAGES ==="
@@ -821,18 +612,8 @@ The data is comprehensive and accurate - USE IT!`;
       : AZURE_OPENAI_ENDPOINT + '/';
     const apiUrl = `${endpoint}openai/deployments/${DEPLOYMENT_NAME}/chat/completions?api-version=${API_VERSION}`;
 
-    // Limit system prompt size to avoid token limits and timeouts
-    // Truncate website content if it's too large (reduce to 8k to prevent timeouts)
-    const maxWebsiteContentLength = 8000; // Reduced to 8k chars to prevent timeouts
-    const truncatedWebsiteContent = combinedWebsiteContent.length > maxWebsiteContentLength
-      ? combinedWebsiteContent.substring(0, maxWebsiteContentLength) + "\n\n[Website content truncated for performance - most relevant sections included]"
-      : combinedWebsiteContent;
-
-    // Update system prompt with truncated content
-    const optimizedSystemPrompt = systemPrompt.replace(
-      combinedWebsiteContent,
-      truncatedWebsiteContent
-    );
+    // System prompt is already optimized - no website content to truncate
+    const optimizedSystemPrompt = systemPrompt;
 
     // Update messages with optimized prompt
     const optimizedMessages = [

@@ -211,6 +211,42 @@ export async function indexContent(content) {
 }
 
 /**
+ * Indexes product chunks directly (for products from JSON)
+ * @param {Array<string>} productChunks - Array of product text chunks
+ */
+export async function indexProductChunks(productChunks) {
+  try {
+    console.log(`Indexing ${productChunks.length} product chunks with embeddings...`);
+    
+    if (productChunks.length === 0) {
+      console.warn("No product chunks to index");
+      return;
+    }
+
+    // Create embeddings for product chunks
+    const embeddings = await createEmbeddings(productChunks);
+
+    if (embeddings.length === productChunks.length) {
+      vectorStore.chunks = productChunks;
+      vectorStore.embeddings = embeddings;
+      vectorStore.lastUpdate = Date.now();
+      console.log(`✅ Indexed ${productChunks.length} product chunks successfully`);
+    } else {
+      console.warn(`Embedding count mismatch: ${embeddings.length} vs ${productChunks.length}`);
+      // Still use what we got
+      if (embeddings.length > 0) {
+        vectorStore.chunks = productChunks.slice(0, embeddings.length);
+        vectorStore.embeddings = embeddings;
+        vectorStore.lastUpdate = Date.now();
+        console.log(`✅ Indexed ${embeddings.length} product chunks (partial)`);
+      }
+    }
+  } catch (error) {
+    console.error("Error indexing product chunks:", error.message);
+  }
+}
+
+/**
  * Gets relevant content for a query using semantic search
  * @param {string} query - User query
  * @param {number} topK - Number of relevant chunks to retrieve
