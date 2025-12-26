@@ -9,8 +9,8 @@ let productCache = {
   ttl: 5 * 60 * 1000, // 5 minutes
 };
 
-const PRODUCT_SERVICE_BACKEND_URL = process.env.PRODUCT_SERVICE_BACKEND_URL || 
-  process.env.NEXT_PUBLIC_PRODUCT_SERVICE_BACKEND_URL || 
+const PRODUCT_SERVICE_BACKEND_URL = process.env.PRODUCT_SERVICE_BACKEND_URL ||
+  process.env.NEXT_PUBLIC_PRODUCT_SERVICE_BACKEND_URL ||
   "https://devshop-backend.skysecure.ai/api/product";
 
 /**
@@ -22,14 +22,14 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
   try {
     // Check cache first
     const now = Date.now();
-    if (productCache.data && productCache.lastFetch && 
-        (now - productCache.lastFetch) < productCache.ttl) {
+    if (productCache.data && productCache.lastFetch &&
+      (now - productCache.lastFetch) < productCache.ttl) {
       console.log("Using cached product data");
       return productCache.data;
     }
 
     console.log("Fetching products from API...");
-    
+
     // CRITICAL: Fetch main products first - this is the most important call
     const allProductsUrl = `${PRODUCT_SERVICE_BACKEND_URL}/products/public/products?page=1&limit=500&sortBy=createdAt&sortOrder=desc`;
     const allProductsResponse = await makeRequest(allProductsUrl, {
@@ -41,7 +41,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       const allProductsData = await allProductsResponse.json();
       if (allProductsData?.data?.docs && Array.isArray(allProductsData.data.docs)) {
         allProducts = allProductsData.data.docs;
-        
+
         // DYNAMIC LOGGING: Log all products fetched from API
         console.log(`\n${'='.repeat(80)}`);
         console.log(`📦 PRODUCTS FETCHED FROM API`);
@@ -71,12 +71,12 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         const subCategoryResponse = await makeRequest(subCategoryUrl, {
           timeout: 15000,
         });
-        
+
         if (subCategoryResponse.ok) {
           const subCategoryData = await subCategoryResponse.json();
           if (subCategoryData?.data?.docs && Array.isArray(subCategoryData.data.docs)) {
             const subCategoryProducts = subCategoryData.data.docs;
-            
+
             // Merge with existing products, avoiding duplicates
             const existingIds = new Set(allProducts.map(p => p._id));
             subCategoryProducts.forEach(product => {
@@ -85,9 +85,9 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
                 existingIds.add(product._id);
               }
             });
-            
+
             console.log(`✅ Added ${subCategoryProducts.length} products from Data Management subcategory (Total: ${allProducts.length})`);
-            
+
             // Log SQL products found
             const sqlProductsFound = subCategoryProducts.filter(p => {
               const name = (p.name || '').toLowerCase();
@@ -107,7 +107,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
     // NON-CRITICAL: Fetch Best Selling products (non-blocking, with shorter timeout)
     // Use Promise to make this non-blocking - don't wait if it takes too long
     console.log("Fetching best selling products (non-blocking)...");
-    
+
     const bestSellingPromise = (async () => {
       try {
         // Try primary endpoint only (faster)
@@ -121,7 +121,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         return null;
       }
     })();
-    
+
     // Don't await - continue with other operations
     let bestSellingResponse = null;
     try {
@@ -136,102 +136,102 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
     const bestSellingIds = new Set();
     const bestSellingProducts = [];
     if (bestSellingResponse.ok) {
-        const bestSellingData = await bestSellingResponse.json();
-        console.log(`Best selling API response structure:`, {
-          hasData: !!bestSellingData?.data,
-          hasDocs: !!bestSellingData?.data?.docs,
-          docsIsArray: Array.isArray(bestSellingData?.data?.docs),
-          docsLength: bestSellingData?.data?.docs?.length || 0,
-          fullResponseKeys: Object.keys(bestSellingData || {}),
-          dataKeys: bestSellingData?.data ? Object.keys(bestSellingData.data) : []
-        });
-        
-        // Log first item structure for debugging
-        if (bestSellingData?.data?.docs && bestSellingData.data.docs.length > 0) {
-          console.log(`Sample best selling item:`, JSON.stringify(bestSellingData.data.docs[0]).substring(0, 500));
-        }
-        
-        if (bestSellingData?.data?.docs && Array.isArray(bestSellingData.data.docs)) {
-          bestSellingData.data.docs.forEach((item, idx) => {
-            // Try multiple ways to get product ID
-            const productId = item?.productId?._id || item?.productId?.id || item?._id || item?.id;
-            
-            // Also check if item has topSelling flag
-            const isTopSelling = item?.topSelling === true || item?.isTopSelling === true || item?.isBestSelling === true;
-            
-            if (productId) {
-              bestSellingIds.add(productId);
-              // Store full product data
-              if (item.productId) {
-                bestSellingProducts.push(item.productId);
-              } else if (item._id || item.id) {
-                // If the item itself is the product
-                bestSellingProducts.push(item);
-              }
-            } else if (isTopSelling && (item._id || item.id)) {
-              // If it's marked as top selling but no productId, it might be the product itself
-              const id = item._id || item.id;
-              bestSellingIds.add(id);
+      const bestSellingData = await bestSellingResponse.json();
+      console.log(`Best selling API response structure:`, {
+        hasData: !!bestSellingData?.data,
+        hasDocs: !!bestSellingData?.data?.docs,
+        docsIsArray: Array.isArray(bestSellingData?.data?.docs),
+        docsLength: bestSellingData?.data?.docs?.length || 0,
+        fullResponseKeys: Object.keys(bestSellingData || {}),
+        dataKeys: bestSellingData?.data ? Object.keys(bestSellingData.data) : []
+      });
+
+      // Log first item structure for debugging
+      if (bestSellingData?.data?.docs && bestSellingData.data.docs.length > 0) {
+        console.log(`Sample best selling item:`, JSON.stringify(bestSellingData.data.docs[0]).substring(0, 500));
+      }
+
+      if (bestSellingData?.data?.docs && Array.isArray(bestSellingData.data.docs)) {
+        bestSellingData.data.docs.forEach((item, idx) => {
+          // Try multiple ways to get product ID
+          const productId = item?.productId?._id || item?.productId?.id || item?._id || item?.id;
+
+          // Also check if item has topSelling flag
+          const isTopSelling = item?.topSelling === true || item?.isTopSelling === true || item?.isBestSelling === true;
+
+          if (productId) {
+            bestSellingIds.add(productId);
+            // Store full product data
+            if (item.productId) {
+              bestSellingProducts.push(item.productId);
+            } else if (item._id || item.id) {
+              // If the item itself is the product
               bestSellingProducts.push(item);
-              console.log(`Found best selling product by flag: ${id}`);
-            } else {
-              console.warn(`Best selling item ${idx} has no productId:`, Object.keys(item || {}));
             }
-          });
-          console.log(`Found ${bestSellingIds.size} best selling products from API`);
-        } else if (Array.isArray(bestSellingData?.data)) {
-          // Handle case where data is directly an array
-          bestSellingData.data.forEach((item, idx) => {
-            const productId = item?.productId?._id || item?.productId?.id || item?._id || item?.id;
-            const isTopSelling = item?.topSelling === true || item?.isTopSelling === true;
-            
-            if (productId) {
-              bestSellingIds.add(productId);
-              if (item.productId) {
-                bestSellingProducts.push(item.productId);
-              } else {
-                bestSellingProducts.push(item);
-              }
-            } else if (isTopSelling && (item._id || item.id)) {
-              const id = item._id || item.id;
-              bestSellingIds.add(id);
-              bestSellingProducts.push(item);
-            } else {
-              console.warn(`Best selling item ${idx} (array format) has no productId:`, Object.keys(item || {}));
-            }
-          });
-          console.log(`Found ${bestSellingIds.size} best selling products from API (array format)`);
-        } else if (bestSellingData?.data && !Array.isArray(bestSellingData.data) && typeof bestSellingData.data === 'object') {
-          // Handle case where data is an object with nested structure
-          console.log("Best selling data is an object, checking for nested products...");
-          const nestedProducts = bestSellingData.data.products || bestSellingData.data.items || [];
-          if (Array.isArray(nestedProducts)) {
-            nestedProducts.forEach(item => {
-              const productId = item?._id || item?.id;
-              if (productId) {
-                bestSellingIds.add(productId);
-                bestSellingProducts.push(item);
-              }
-            });
-            console.log(`Found ${bestSellingIds.size} best selling products from nested structure`);
+          } else if (isTopSelling && (item._id || item.id)) {
+            // If it's marked as top selling but no productId, it might be the product itself
+            const id = item._id || item.id;
+            bestSellingIds.add(id);
+            bestSellingProducts.push(item);
+            console.log(`Found best selling product by flag: ${id}`);
+          } else {
+            console.warn(`Best selling item ${idx} has no productId:`, Object.keys(item || {}));
           }
-        } else {
-          console.warn("Best selling API response structure unexpected:", {
-            responseKeys: Object.keys(bestSellingData || {}),
-            dataType: typeof bestSellingData?.data,
-            dataValue: bestSellingData?.data ? JSON.stringify(bestSellingData.data).substring(0, 200) : 'null'
+        });
+        console.log(`Found ${bestSellingIds.size} best selling products from API`);
+      } else if (Array.isArray(bestSellingData?.data)) {
+        // Handle case where data is directly an array
+        bestSellingData.data.forEach((item, idx) => {
+          const productId = item?.productId?._id || item?.productId?.id || item?._id || item?.id;
+          const isTopSelling = item?.topSelling === true || item?.isTopSelling === true;
+
+          if (productId) {
+            bestSellingIds.add(productId);
+            if (item.productId) {
+              bestSellingProducts.push(item.productId);
+            } else {
+              bestSellingProducts.push(item);
+            }
+          } else if (isTopSelling && (item._id || item.id)) {
+            const id = item._id || item.id;
+            bestSellingIds.add(id);
+            bestSellingProducts.push(item);
+          } else {
+            console.warn(`Best selling item ${idx} (array format) has no productId:`, Object.keys(item || {}));
+          }
+        });
+        console.log(`Found ${bestSellingIds.size} best selling products from API (array format)`);
+      } else if (bestSellingData?.data && !Array.isArray(bestSellingData.data) && typeof bestSellingData.data === 'object') {
+        // Handle case where data is an object with nested structure
+        console.log("Best selling data is an object, checking for nested products...");
+        const nestedProducts = bestSellingData.data.products || bestSellingData.data.items || [];
+        if (Array.isArray(nestedProducts)) {
+          nestedProducts.forEach(item => {
+            const productId = item?._id || item?.id;
+            if (productId) {
+              bestSellingIds.add(productId);
+              bestSellingProducts.push(item);
+            }
           });
+          console.log(`Found ${bestSellingIds.size} best selling products from nested structure`);
         }
+      } else {
+        console.warn("Best selling API response structure unexpected:", {
+          responseKeys: Object.keys(bestSellingData || {}),
+          dataType: typeof bestSellingData?.data,
+          dataValue: bestSellingData?.data ? JSON.stringify(bestSellingData.data).substring(0, 200) : 'null'
+        });
+      }
     } else {
       console.warn(`Best selling API returned status ${bestSellingResponse.status}`);
       const errorText = await bestSellingResponse.text().catch(() => '');
       console.warn(`Best selling API error: ${errorText.substring(0, 500)}`);
     }
-    
+
     // If no best selling products found from API, try alternative approaches
     if (bestSellingIds.size === 0 && allProducts.length > 0) {
       console.log("No best selling products from API, trying alternative methods...");
-      
+
       // Method 1: Check if products in main list have a "topSelling" or "isTopSelling" flag
       allProducts.forEach(product => {
         if (product.topSelling === true || product.isTopSelling === true || product.isBestSelling === true) {
@@ -239,18 +239,18 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
           bestSellingProducts.push(product);
         }
       });
-      
+
       // Method 2: Try fetching without the topSelling parameter to see all premium offerings
       if (bestSellingIds.size === 0) {
         console.log("Trying to fetch all premium offerings to find best selling...");
         try {
           const allOfferingsUrl = `${PRODUCT_SERVICE_BACKEND_URL}/premium-offerings/public/get-all-offerings?page=1&limit=100`;
           const allOfferingsResponse = await makeRequest(allOfferingsUrl, { timeout: 10000 });
-          
+
           if (allOfferingsResponse.ok) {
             const allOfferingsData = await allOfferingsResponse.json();
             const offerings = allOfferingsData?.data?.docs || allOfferingsData?.data || [];
-            
+
             // Check for topSelling flag in the offering itself
             offerings.forEach(offering => {
               if (offering.topSelling === true || offering.isTopSelling === true) {
@@ -269,7 +269,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
           console.warn("Error fetching all offerings:", error.message);
         }
       }
-      
+
       console.log(`Total best selling products found: ${bestSellingIds.size}`);
     }
 
@@ -279,7 +279,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       `${PRODUCT_SERVICE_BACKEND_URL}/premium-offerings/public/get-all-offerings?latest=true&page=1&limit=100`,
       { timeout: 8000 }
     ).catch(() => null);
-    
+
     let recentlyAddedResponse = null;
     try {
       recentlyAddedResponse = await Promise.race([
@@ -366,7 +366,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       console.error("❌ No products available and no cache - returning empty array");
       return [];
     }
-    
+
     console.log(`✅ Successfully fetched ${allProducts.length} products from API`);
 
     // Get current date for recently added calculation
@@ -379,12 +379,12 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       const createdAt = item.createdAt ? new Date(item.createdAt) : null;
       const isRecentlyCreated = createdAt && createdAt >= thirtyDaysAgo;
       const productId = item._id;
-      
+
       // Check if this product is in best selling, featured, or recently added
       const isBestSelling = bestSellingIds.has(productId);
       const isFeatured = featuredIds.has(productId);
       const isRecentlyAdded = recentlyAddedIds.has(productId);
-      
+
       return {
         id: productId,
         name: item.name,
@@ -416,7 +416,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         isLatest: isRecentlyAdded || item.isLatest || isRecentlyCreated || false,
       };
     });
-    
+
     // DYNAMIC LOGGING: Log parsed products with categorization
     console.log(`\n${'='.repeat(80)}`);
     console.log(`🔄 PRODUCTS PARSED AND TRANSFORMED`);
@@ -425,33 +425,33 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
     console.log(`Featured: ${products.filter(p => p.isFeatured).length}`);
     console.log(`Top Selling: ${products.filter(p => p.isTopSelling).length}`);
     console.log(`Recently Added: ${products.filter(p => p.isLatest).length}`);
-    
+
     // Group by category for dynamic logging
     const byCategory = {};
     const bySubCategory = {};
     const byVendor = {};
-    
+
     products.forEach((product) => {
       const category = product.category || "Uncategorized";
       const subCategory = product.subCategory || "General";
       const vendor = product.vendor || "Unknown Vendor";
-      
+
       if (!byCategory[category]) byCategory[category] = [];
       byCategory[category].push(product);
-      
+
       if (!bySubCategory[subCategory]) bySubCategory[subCategory] = [];
       bySubCategory[subCategory].push(product);
-      
+
       if (!byVendor[vendor]) byVendor[vendor] = [];
       byVendor[vendor].push(product);
     });
-    
+
     console.log(`\n📊 PRODUCTS BY CATEGORY:`);
     console.log(`${'-'.repeat(80)}`);
     Object.entries(byCategory).sort((a, b) => b[1].length - a[1].length).forEach(([category, categoryProducts]) => {
       console.log(`  ${category}: ${categoryProducts.length} products`);
     });
-    
+
     console.log(`\n📊 PRODUCTS BY SUB-CATEGORY:`);
     console.log(`${'-'.repeat(80)}`);
     Object.entries(bySubCategory).sort((a, b) => b[1].length - a[1].length).forEach(([subCategory, subCategoryProducts]) => {
@@ -466,13 +466,13 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         }
       }
     });
-    
+
     console.log(`\n📊 PRODUCTS BY VENDOR:`);
     console.log(`${'-'.repeat(80)}`);
     Object.entries(byVendor).sort((a, b) => b[1].length - a[1].length).forEach(([vendor, vendorProducts]) => {
       console.log(`  ${vendor}: ${vendorProducts.length} products`);
     });
-    
+
     // DYNAMIC LOGGING: Log all product names with details
     console.log(`\n📋 ALL PARSED PRODUCT NAMES (${products.length} products):`);
     console.log(`${'-'.repeat(80)}`);
@@ -486,7 +486,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       console.log(`        ID: ${product.id} | Vendor: ${product.vendor} | Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''} | Price: ₹${product.price}/${product.billingCycle}`);
     });
     console.log(`${'='.repeat(80)}\n`);
-    
+
     console.log(`After mapping: ${products.filter(p => p.isTopSelling).length} products marked as top selling`);
 
     // Also add products from premium-offerings that might not be in the main products list
@@ -494,7 +494,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
     bestSellingProducts.forEach(product => {
       const productId = product._id;
       const existingProduct = products.find(p => p.id === productId);
-      
+
       if (existingProduct) {
         // Update existing product to mark as best selling
         existingProduct.isTopSelling = true;
@@ -503,7 +503,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         // Add new product from best selling API
         const createdAt = product.createdAt ? new Date(product.createdAt) : null;
         const isRecentlyCreated = createdAt && createdAt >= thirtyDaysAgo;
-        
+
         products.push({
           id: productId,
           name: product.name,
@@ -542,7 +542,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       if (!products.find(p => p.id === product._id)) {
         const createdAt = product.createdAt ? new Date(product.createdAt) : null;
         const isRecentlyCreated = createdAt && createdAt >= thirtyDaysAgo;
-        
+
         products.push({
           id: product._id,
           name: product.name,
@@ -573,11 +573,11 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         console.log("No products marked as 'latest' from API, trying website scraping fallback...");
         const recentlyAddedNames = extractRecentlyAddedProductsFromWebsite(websiteContent);
         console.log(`Found ${recentlyAddedNames.length} product names in 'Recently Added' section from website`);
-        
+
         if (recentlyAddedNames.length > 0) {
           const matchedIds = matchProductsByName(recentlyAddedNames, products);
           console.log(`Matched ${matchedIds.length} products from website 'Recently Added' section`);
-          
+
           matchedIds.forEach(productId => {
             const product = products.find(p => p.id === productId);
             if (product) {
@@ -591,7 +591,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         // Continue without marking products - don't crash the whole process
       }
     }
-    
+
     // If still no products marked as "latest", use createdAt date as final fallback
     if (products.filter(p => p.isLatest).length === 0) {
       console.log("No products found from website scraping, using createdAt date as fallback");
@@ -599,13 +599,13 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         .filter(p => p.createdAtDate)
         .sort((a, b) => b.createdAtDate - a.createdAtDate)
         .slice(0, 20); // Top 20 most recent
-      
+
       sortedByDate.forEach(product => {
         product.isLatest = true;
       });
       console.log(`Marked ${sortedByDate.length} products as recently added based on createdAt date`);
     }
-    
+
     // If no products marked as "best selling" from API, try website scraping fallback
     const currentBestSellingCount = products.filter(p => p.isTopSelling).length;
     if (currentBestSellingCount === 0 && websiteContent) {
@@ -613,18 +613,18 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         console.log("No products marked as 'best selling' from API, trying website scraping fallback...");
         console.log(`Website content length: ${websiteContent.length} characters`);
         console.log(`Website content sample (first 1000 chars): ${websiteContent.substring(0, 1000)}`);
-        
+
         const bestSellingNames = extractBestSellingProductsFromWebsite(websiteContent);
         console.log(`Found ${bestSellingNames.length} product names in 'Best Selling' section from website`);
         if (bestSellingNames.length > 0) {
           console.log(`Product names found: ${bestSellingNames.join(', ')}`);
         }
-        
+
         if (bestSellingNames.length > 0) {
           const matchedIds = matchProductsByName(bestSellingNames, products);
           console.log(`Matched ${matchedIds.length} products from website 'Best Selling' section`);
           console.log(`Matched product IDs: ${matchedIds.slice(0, 10).join(', ')}`);
-          
+
           matchedIds.forEach(productId => {
             const product = products.find(p => p.id === productId);
             if (product) {
@@ -632,29 +632,29 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
               console.log(`Marked product "${product.name}" (ID: ${product.id}) as best selling from website match`);
             }
           });
-          
+
           const newBestSellingCount = products.filter(p => p.isTopSelling).length;
           console.log(`After website matching: ${newBestSellingCount} products marked as best selling (was ${currentBestSellingCount})`);
         } else {
           console.warn("No product names extracted from website 'Best Selling' section. Website content may not contain the section or extraction failed.");
           console.warn("Checking if 'best selling' text exists in content:", websiteContent.toLowerCase().includes('best selling'));
-          
+
           // FINAL FALLBACK: If extraction failed but "best selling" section exists, 
           // try to match products that contain common best-selling keywords
           if (websiteContent.toLowerCase().includes('best selling')) {
             console.log("'Best Selling' text found but no products extracted. Trying keyword-based matching...");
-            
+
             // Look for products with names that might appear in best selling section
             // Common best sellers are usually Microsoft 365 E3/E5 variants
             const bestSellingKeywords = ['E3', 'E5', '365'];
             const potentialBestSellers = products.filter(p => {
               const name = (p.name || '').toLowerCase();
               return bestSellingKeywords.some(keyword => name.includes(keyword.toLowerCase())) &&
-                     name.includes('microsoft') &&
-                     !name.includes('security') && 
-                     !name.includes('compliance');
+                name.includes('microsoft') &&
+                !name.includes('security') &&
+                !name.includes('compliance');
             });
-            
+
             if (potentialBestSellers.length > 0) {
               console.log(`Found ${potentialBestSellers.length} potential best sellers based on keywords`);
               // Mark top 10 as best selling
@@ -682,7 +682,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
           scraped.forEach((sp) => {
             const key = `${(sp.name || '').toLowerCase()}|${(sp.vendor || '').toLowerCase()}`;
             if (!existing.has(key)) {
-              const id = `scraped-${Buffer.from(key).toString('base64').replace(/=+$/,'')}`;
+              const id = `scraped-${Buffer.from(key).toString('base64').replace(/=+$/, '')}`;
               products.push({
                 id,
                 name: sp.name,
@@ -725,28 +725,28 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
     console.log(`Featured Products: ${products.filter(p => p.isFeatured).length}`);
     console.log(`Top Selling Products: ${products.filter(p => p.isTopSelling).length}`);
     console.log(`Recently Added Products: ${products.filter(p => p.isLatest).length}`);
-    
+
     // Dynamic search categories
     const sqlProducts = products.filter(p => {
       const name = (p.name || '').toLowerCase();
       const desc = (p.description || '').toLowerCase();
       return name.includes('sql') || desc.includes('sql') || name.includes('database');
     });
-    
+
     const emailProducts = products.filter(p => {
       const name = (p.name || '').toLowerCase();
       const desc = (p.description || '').toLowerCase();
       return name.includes('email') || desc.includes('email') || name.includes('exchange') || name.includes('outlook');
     });
-    
+
     const collaborationProducts = products.filter(p => {
       const name = (p.name || '').toLowerCase();
       const desc = (p.description || '').toLowerCase();
       const subCat = (p.subCategory || '').toLowerCase();
-      return name.includes('teams') || name.includes('sharepoint') || name.includes('onedrive') || 
-             subCat.includes('collaboration');
+      return name.includes('teams') || name.includes('sharepoint') || name.includes('onedrive') ||
+        subCat.includes('collaboration');
     });
-    
+
     console.log(`\n🔍 DYNAMIC SEARCH CATEGORIES:`);
     console.log(`${'-'.repeat(80)}`);
     console.log(`SQL/Database Products: ${sqlProducts.length}`);
@@ -755,21 +755,21 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         console.log(`  ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
       });
     }
-    
+
     console.log(`Email Products: ${emailProducts.length}`);
     if (emailProducts.length > 0) {
       emailProducts.forEach((p, idx) => {
         console.log(`  ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
       });
     }
-    
+
     console.log(`Collaboration Products: ${collaborationProducts.length}`);
     if (collaborationProducts.length > 0) {
       collaborationProducts.forEach((p, idx) => {
         console.log(`  ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
       });
     }
-    
+
     // Group final products by category
     const finalByCategory = {};
     products.forEach(p => {
@@ -777,7 +777,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       if (!finalByCategory[cat]) finalByCategory[cat] = [];
       finalByCategory[cat].push(p);
     });
-    
+
     console.log(`\n📦 FINAL PRODUCTS BY CATEGORY:`);
     console.log(`${'-'.repeat(80)}`);
     Object.entries(finalByCategory).sort((a, b) => b[1].length - a[1].length).forEach(([category, categoryProducts]) => {
@@ -789,20 +789,20 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         console.log(`    ... and ${categoryProducts.length - 5} more`);
       }
     });
-    
+
     console.log(`${'='.repeat(80)}\n`);
-    
+
     return products;
   } catch (error) {
     console.error("Error fetching products:", error.message);
     console.error("Stack trace:", error.stack);
-    
+
     // Return cached data if available, otherwise empty array
     if (productCache.data && productCache.data.length > 0) {
       console.warn("Using cached product data due to fetch error");
       return productCache.data;
     }
-    
+
     // If no cache, return empty array - server.js will handle the error message
     console.error("No cached data available, returning empty array");
     return [];
@@ -825,16 +825,16 @@ export function formatProductsForKnowledgeBase(products) {
   // Group by category
   const byCategory = {};
   const bySubCategory = {};
-  
+
   products.forEach((product) => {
     const category = product.category || "Uncategorized";
     const subCategory = product.subCategory || "General";
-    
+
     if (!byCategory[category]) {
       byCategory[category] = [];
     }
     byCategory[category].push(product);
-    
+
     if (!bySubCategory[subCategory]) {
       bySubCategory[subCategory] = [];
     }
@@ -859,6 +859,7 @@ export function formatProductsForKnowledgeBase(products) {
         .sort((a, b) => (b.price || 0) - (a.price || 0)) // Sort by price descending
         .forEach((product) => {
           knowledgeBase += `  - ${product.name} (${product.vendor}): ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
+          if (product.url) knowledgeBase += `    Link: ${product.url}\n`;
         });
       knowledgeBase += `\n`;
     }
@@ -871,24 +872,24 @@ export function formatProductsForKnowledgeBase(products) {
     const desc = (p.description || '').toLowerCase();
     const subCat = (p.subCategory || '').toLowerCase();
     const category = (p.category || '').toLowerCase();
-    
+
     // Check for SQL keywords in various forms
     const sqlKeywords = ['sql', 'database', 'db', 'data management', 'data management', 'server'];
-    const hasSqlKeyword = sqlKeywords.some(keyword => 
-      name.includes(keyword) || 
-      desc.includes(keyword) || 
+    const hasSqlKeyword = sqlKeywords.some(keyword =>
+      name.includes(keyword) ||
+      desc.includes(keyword) ||
       subCat.includes(keyword) ||
       category.includes(keyword)
     );
-    
+
     // Also check if product is in Data Management subcategory
-    const isDataManagement = subCat.includes('data management') || 
-                            subCat.includes('data-management') ||
-                            category.includes('data');
-    
+    const isDataManagement = subCat.includes('data management') ||
+      subCat.includes('data-management') ||
+      category.includes('data');
+
     return hasSqlKeyword || isDataManagement;
   });
-  
+
   // Log SQL products found for debugging
   if (sqlProducts.length > 0) {
     console.log(`\n🔍 SQL PRODUCTS DETECTED: ${sqlProducts.length} products`);
@@ -905,7 +906,7 @@ export function formatProductsForKnowledgeBase(products) {
       });
     }
   }
-  
+
   if (sqlProducts.length > 0) {
     knowledgeBase += `\n=== SQL PRODUCTS (${sqlProducts.length} products) ===\n`;
     knowledgeBase += `These are ALL SQL and database-related products in SkySecure Marketplace. When a user asks about SQL products, you MUST list ALL of these products with their full details:\n\n`;
@@ -913,7 +914,7 @@ export function formatProductsForKnowledgeBase(products) {
       knowledgeBase += `${index + 1}. **${product.name}**\n`;
       knowledgeBase += `   ${product.name}\n`; // Duplicate name for search results format
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
-      
+
       // Get all subscription options if available
       const subscriptions = product.subscriptions || [];
       if (subscriptions.length > 0) {
@@ -930,7 +931,7 @@ export function formatProductsForKnowledgeBase(products) {
         const formattedPrice = price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         knowledgeBase += `   Price: ₹${formattedPrice} / ${billingCycle}\n`;
       }
-      
+
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       if (product.id) {
         knowledgeBase += `   Product ID: ${product.id}\n`;
@@ -959,14 +960,14 @@ export function formatProductsForKnowledgeBase(products) {
     const desc = (p.description || '').toLowerCase();
     const subCat = (p.subCategory || '').toLowerCase();
     return name.includes('email') || desc.includes('email') ||
-           name.includes('exchange') || desc.includes('exchange') ||
-           name.includes('outlook') || desc.includes('outlook') ||
-           name.includes('teams') || desc.includes('teams') ||
-           name.includes('sharepoint') || desc.includes('sharepoint') ||
-           name.includes('onedrive') || desc.includes('onedrive') ||
-           subCat.includes('collaboration') || subCat.includes('communication');
+      name.includes('exchange') || desc.includes('exchange') ||
+      name.includes('outlook') || desc.includes('outlook') ||
+      name.includes('teams') || desc.includes('teams') ||
+      name.includes('sharepoint') || desc.includes('sharepoint') ||
+      name.includes('onedrive') || desc.includes('onedrive') ||
+      subCat.includes('collaboration') || subCat.includes('communication');
   });
-  
+
   if (emailCollabProducts.length > 0) {
     knowledgeBase += `\n=== EMAIL & COLLABORATION PRODUCTS (${emailCollabProducts.length} products) ===\n`;
     knowledgeBase += `These are ALL Email and Collaboration Tools in SkySecure Marketplace:\n\n`;
@@ -975,6 +976,9 @@ export function formatProductsForKnowledgeBase(products) {
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      if (product.url) {
+        knowledgeBase += `   Link: ${product.url}\n`;
+      }
       if (product.description) {
         knowledgeBase += `   Description: ${product.description.substring(0, 150)}...\n`;
       }
@@ -989,6 +993,9 @@ export function formatProductsForKnowledgeBase(products) {
     knowledgeBase += `${index + 1}. ${product.name} (${product.vendor})\n`;
     knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
     knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
+    if (product.url) {
+      knowledgeBase += `   Link: ${product.url}\n`;
+    }
     if (product.description) {
       knowledgeBase += `   Description: ${product.description.substring(0, 100)}...\n`;
     }
@@ -1008,6 +1015,9 @@ export function formatProductsForKnowledgeBase(products) {
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      if (product.url) {
+        knowledgeBase += `   Link: ${product.url}\n`;
+      }
       if (product.description) {
         knowledgeBase += `   Description: ${product.description.substring(0, 150)}...\n`;
       }
@@ -1023,7 +1033,7 @@ export function formatProductsForKnowledgeBase(products) {
   // Add top selling products - CRITICAL SECTION
   const topSelling = products.filter((p) => p.isTopSelling === true);
   console.log(`Formatting: Found ${topSelling.length} products with isTopSelling=true`);
-  
+
   if (topSelling.length > 0) {
     knowledgeBase += `\n=== TOP SELLING / BEST SELLING PRODUCTS (${topSelling.length} products) ===\n`;
     knowledgeBase += `These are the BEST SELLING products in SkySecure Marketplace:\n\n`;
@@ -1032,6 +1042,9 @@ export function formatProductsForKnowledgeBase(products) {
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      if (product.url) {
+        knowledgeBase += `   Link: ${product.url}\n`;
+      }
       if (product.description) {
         knowledgeBase += `   Description: ${product.description.substring(0, 150)}...\n`;
       }
@@ -1057,7 +1070,7 @@ export function formatProductsForKnowledgeBase(products) {
       if (!b.createdAtDate) return -1;
       return b.createdAtDate - a.createdAtDate;
     });
-    
+
     knowledgeBase += `\n=== RECENTLY ADDED PRODUCTS (${sortedRecentlyAdded.length} products) ===\n`;
     knowledgeBase += `These are the RECENTLY ADDED products in SkySecure Marketplace:\n\n`;
     sortedRecentlyAdded.forEach((product, index) => {
@@ -1065,6 +1078,9 @@ export function formatProductsForKnowledgeBase(products) {
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      if (product.url) {
+        knowledgeBase += `   Link: ${product.url}\n`;
+      }
       if (product.createdAt) {
         const date = new Date(product.createdAt);
         knowledgeBase += `   Added: ${date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}\n`;
@@ -1087,7 +1103,7 @@ export function formatProductsForKnowledgeBase(products) {
     const sortedByPrice = categoryProducts
       .filter((p) => p.price > 0)
       .sort((a, b) => (b.price || 0) - (a.price || 0));
-    
+
     if (sortedByPrice.length > 0) {
       const mostExpensive = sortedByPrice[0];
       knowledgeBase += `Most Expensive in ${category}: ${mostExpensive.name} - ₹${mostExpensive.price}/${mostExpensive.billingCycle}\n`;

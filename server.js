@@ -13,6 +13,7 @@ import { scrapeEntireWebsite } from "./utils/comprehensiveScraper.js";
 import { indexContent, indexProductChunks, getRelevantContent, needsUpdate } from "./utils/embeddingService.js";
 import { trackConversationState, getStagePrompt, generateGuidingQuestion, suggestQuickReplies } from "./utils/conversationManager.js";
 import { loadProductsFromJSON, productsToTextChunks } from "./utils/productLoader.js";
+import { loadMarketplaceSignals, resolveProductsByIds } from "./utils/marketplaceSignalsLoader.js";
 
 dotenv.config();
 
@@ -72,6 +73,116 @@ app.options("/api/chat", (req, res) => {
   res.status(200).end();
 });
 
+/**
+ * Augments knowledge base with marketplace signals based on query intent
+ * @param {string} queryLower - Lowercase user query
+ * @param {Array} products - All products array
+ * @param {Object} marketplaceSignals - Marketplace signals object
+ * @param {Object} categoryRankings - Category rankings object
+ * @param {Object} oemRankings - OEM rankings object
+ * @returns {string} - Augmented knowledge base sections or empty string
+ */
+function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignals, categoryRankings, oemRankings) {
+  let augmentedSections = "";
+
+  // a) BEST SELLING PRODUCTS
+  if (queryLower.includes('best selling') || queryLower.includes('top selling') || queryLower.includes('popular products')) {
+    if (marketplaceSignals?.bestSelling && Array.isArray(marketplaceSignals.bestSelling)) {
+      const bestSellingProducts = resolveProductsByIds(marketplaceSignals.bestSelling, products);
+      if (bestSellingProducts.length > 0) {
+        augmentedSections += `\n=== TOP SELLING / BEST SELLING PRODUCTS (${bestSellingProducts.length} products) ===\n`;
+        augmentedSections += `These are the best selling products in SkySecure Marketplace based on marketplace signals:\n\n`;
+        bestSellingProducts.forEach((product, index) => {
+          augmentedSections += `${index + 1}. **${product.name}**\n`;
+          augmentedSections += `   Vendor: ${product.vendor}\n`;
+          augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+          augmentedSections += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+          if (product.description) {
+            augmentedSections += `   Description: ${product.description.substring(0, 150)}...\n`;
+          }
+          augmentedSections += `\n`;
+        });
+        augmentedSections += `=== END TOP SELLING / BEST SELLING PRODUCTS ===\n\n`;
+      }
+    }
+  }
+
+  // b) CATEGORY OVERVIEW
+  if (queryLower.includes('categories') || queryLower.includes('domains') || queryLower.includes('segments') ||
+    queryLower.includes('what categories') || queryLower.includes('list categories')) {
+    if (categoryRankings && Object.keys(categoryRankings).length > 0) {
+      augmentedSections += `\n=== CATEGORY OVERVIEW ===\n`;
+      augmentedSections += `SkySecure Marketplace offers Software products under these domains:\n\n`;
+      Object.entries(categoryRankings).forEach(([categoryName, productIds]) => {
+        const productCount = Array.isArray(productIds) ? productIds.length : 0;
+        augmentedSections += `- **${categoryName}**: ${productCount} products\n`;
+      });
+      augmentedSections += `=== END CATEGORY OVERVIEW ===\n\n`;
+    }
+  }
+
+  // c) CATEGORY-SPECIFIC QUERIES
+  if (categoryRankings) {
+    for (const [categoryName, productIds] of Object.entries(categoryRankings)) {
+      const categoryLower = categoryName.toLowerCase();
+      // Check if query mentions this category (case-insensitive)
+      if (queryLower.includes(categoryLower) ||
+        queryLower.includes(categoryName.toLowerCase().replace(/\s+/g, '-'))) {
+        if (Array.isArray(productIds) && productIds.length > 0) {
+          const categoryProducts = resolveProductsByIds(productIds, products);
+          if (categoryProducts.length > 0) {
+            augmentedSections += `\n=== PRODUCTS IN CATEGORY: ${categoryName} (${categoryProducts.length} products) ===\n`;
+            augmentedSections += `These are all products in the ${categoryName} category:\n\n`;
+            categoryProducts.forEach((product, index) => {
+              augmentedSections += `${index + 1}. **${product.name}**\n`;
+              augmentedSections += `   Vendor: ${product.vendor}\n`;
+              augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+              if (product.description) {
+                augmentedSections += `   Description: ${product.description.substring(0, 150)}...\n`;
+              }
+              augmentedSections += `\n`;
+            });
+            augmentedSections += `=== END PRODUCTS IN CATEGORY: ${categoryName} ===\n\n`;
+            break; // Only process first matching category
+          }
+        }
+      }
+    }
+  }
+
+  // d) OEM / VENDOR QUERIES
+  if (oemRankings) {
+    for (const [oemName, productIds] of Object.entries(oemRankings)) {
+      const oemLower = oemName.toLowerCase();
+      // Check if query mentions this OEM/vendor (case-insensitive)
+      if (queryLower.includes(oemLower) ||
+        queryLower.includes(`products by ${oemLower}`) ||
+        queryLower.includes(`${oemLower} products`)) {
+        if (Array.isArray(productIds) && productIds.length > 0) {
+          const oemProducts = resolveProductsByIds(productIds, products);
+          if (oemProducts.length > 0) {
+            augmentedSections += `\n=== PRODUCTS BY OEM/VENDOR: ${oemName} (${oemProducts.length} products) ===\n`;
+            augmentedSections += `These are all products from ${oemName}:\n\n`;
+            oemProducts.forEach((product, index) => {
+              augmentedSections += `${index + 1}. **${product.name}**\n`;
+              augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+              augmentedSections += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+              if (product.description) {
+                augmentedSections += `   Description: ${product.description.substring(0, 150)}...\n`;
+              }
+              augmentedSections += `\n`;
+            });
+            augmentedSections += `=== END PRODUCTS BY OEM/VENDOR: ${oemName} ===\n\n`;
+            break; // Only process first matching OEM
+          }
+        }
+      }
+    }
+  }
+
+  return augmentedSections;
+}
+
 // Chatbot endpoint
 app.post("/api/chat", async (req, res) => {
   try {
@@ -96,7 +207,7 @@ app.post("/api/chat", async (req, res) => {
     // Load products from JSON file instead of scraping/API
     const baseUrl = process.env.KNOWLEDGE_BASE_URL || "https://shop.skysecure.ai/";
     let relevantContent = "";
-    
+
     // DYNAMIC: resolveIntent is now async - await it
     const intentInfo = await resolveIntent(message, baseUrl);
     const conversationStage = inferConversationStage(conversationHistory, message, intentInfo);
@@ -110,7 +221,7 @@ app.post("/api/chat", async (req, res) => {
     // Load products from JSON file
     console.log("Loading products from products_normalized.json...");
     const productsFromJSON = await loadProductsFromJSON();
-    
+
     // Index products with embeddings for semantic search
     if (productsFromJSON.length > 0 && needsUpdate()) {
       console.log("Indexing products with embeddings for semantic search...");
@@ -143,6 +254,43 @@ app.post("/api/chat", async (req, res) => {
     let products = productsFromJSON || [];
     let productFetchError = null;
 
+    // Load marketplace signals and enrich products
+    console.log("Loading marketplace signals...");
+    const { marketplaceSignals, categoryRankings, oemRankings } = await loadMarketplaceSignals();
+
+    // Enrich products with marketplace signals (set flags)
+    if (marketplaceSignals) {
+      // Set best selling flag
+      if (marketplaceSignals.bestSelling && Array.isArray(marketplaceSignals.bestSelling)) {
+        const bestSellingProducts = resolveProductsByIds(marketplaceSignals.bestSelling, products);
+        bestSellingProducts.forEach(product => {
+          product.isTopSelling = true;
+        });
+        console.log(`✅ Marked ${bestSellingProducts.length} products as best selling`);
+      }
+
+      // Set featured flag
+      if (marketplaceSignals.featured && Array.isArray(marketplaceSignals.featured)) {
+        const featuredProducts = resolveProductsByIds(marketplaceSignals.featured, products);
+        featuredProducts.forEach(product => {
+          product.isFeatured = true;
+        });
+        console.log(`✅ Marked ${featuredProducts.length} products as featured`);
+      }
+
+      // Set recently added flag
+      if (marketplaceSignals.recentlyAdded && Array.isArray(marketplaceSignals.recentlyAdded)) {
+        const recentlyAddedIds = marketplaceSignals.recentlyAdded.map(item =>
+          typeof item === 'object' ? item.productId : item
+        );
+        const recentlyAddedProducts = resolveProductsByIds(recentlyAddedIds, products);
+        recentlyAddedProducts.forEach(product => {
+          product.isLatest = true;
+        });
+        console.log(`✅ Marked ${recentlyAddedProducts.length} products as recently added`);
+      }
+    }
+
     console.log(`\n${'='.repeat(80)}`);
     console.log(`📊 PRODUCTS RETRIEVED FOR KNOWLEDGE BASE`);
     console.log(`${'='.repeat(80)}`);
@@ -155,11 +303,11 @@ app.post("/api/chat", async (req, res) => {
     console.log(`  - Featured: ${featuredCount}`);
     console.log(`  - Top Selling: ${topSellingCount}`);
     console.log(`  - Recently Added: ${recentlyAddedCount}`);
-    
+
     // DYNAMIC SEARCH: Analyze user query for specific product searches
     const queryLower = message.toLowerCase();
     const searchTerms = [];
-    
+
     // Detect SQL-related queries
     if (queryLower.includes('sql') || queryLower.includes('database')) {
       searchTerms.push('SQL/Database');
@@ -174,15 +322,15 @@ app.post("/api/chat", async (req, res) => {
         console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
       });
     }
-    
+
     // Detect Email-related queries
     if (queryLower.includes('email') || queryLower.includes('exchange') || queryLower.includes('outlook')) {
       searchTerms.push('Email');
       const emailProducts = products.filter(p => {
         const name = (p.name || '').toLowerCase();
         const desc = (p.description || '').toLowerCase();
-        return name.includes('email') || desc.includes('email') || 
-               name.includes('exchange') || name.includes('outlook');
+        return name.includes('email') || desc.includes('email') ||
+          name.includes('exchange') || name.includes('outlook');
       });
       console.log(`\n🔍 DYNAMIC SEARCH: Email Products`);
       console.log(`  Found ${emailProducts.length} Email products:`);
@@ -190,17 +338,17 @@ app.post("/api/chat", async (req, res) => {
         console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
       });
     }
-    
+
     // Detect Collaboration-related queries
-    if (queryLower.includes('collaboration') || queryLower.includes('teams') || 
-        queryLower.includes('sharepoint') || queryLower.includes('onedrive')) {
+    if (queryLower.includes('collaboration') || queryLower.includes('teams') ||
+      queryLower.includes('sharepoint') || queryLower.includes('onedrive')) {
       searchTerms.push('Collaboration');
       const collabProducts = products.filter(p => {
         const name = (p.name || '').toLowerCase();
         const desc = (p.description || '').toLowerCase();
         const subCat = (p.subCategory || '').toLowerCase();
-        return name.includes('teams') || name.includes('sharepoint') || 
-               name.includes('onedrive') || subCat.includes('collaboration');
+        return name.includes('teams') || name.includes('sharepoint') ||
+          name.includes('onedrive') || subCat.includes('collaboration');
       });
       console.log(`\n🔍 DYNAMIC SEARCH: Collaboration Products`);
       console.log(`  Found ${collabProducts.length} Collaboration products:`);
@@ -208,11 +356,11 @@ app.post("/api/chat", async (req, res) => {
         console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
       });
     }
-    
+
     if (searchTerms.length > 0) {
       console.log(`\n🎯 Search Terms Detected: ${searchTerms.join(', ')}`);
     }
-    
+
     // Group products by category for logging
     const productsByCategory = {};
     products.forEach(p => {
@@ -220,12 +368,12 @@ app.post("/api/chat", async (req, res) => {
       if (!productsByCategory[cat]) productsByCategory[cat] = [];
       productsByCategory[cat].push(p);
     });
-    
+
     console.log(`\n📦 Products by Category:`);
     Object.entries(productsByCategory).sort((a, b) => b[1].length - a[1].length).forEach(([cat, catProducts]) => {
       console.log(`  ${cat}: ${catProducts.length} products`);
     });
-    
+
     console.log(`${'='.repeat(80)}\n`);
 
     if (products.length === 0 && productFetchError) {
@@ -259,10 +407,24 @@ app.post("/api/chat", async (req, res) => {
     // Skip website scraping - using products from JSON file instead
     let listingProductsSection = "";
     console.log("✅ Using products from JSON file - skipping website scraping to avoid timeouts");
-    
+
     // Re-format knowledge base with products from JSON
-    const productKnowledgeBase = formatProductsForKnowledgeBase(products);
+    let productKnowledgeBase = formatProductsForKnowledgeBase(products);
     console.log(`Product knowledge base created: ${productKnowledgeBase.length} characters`);
+
+    // Augment knowledge base with marketplace signals based on query intent
+    const augmentedSections = augmentKnowledgeBaseWithSignals(
+      queryLower,
+      products,
+      marketplaceSignals,
+      categoryRankings,
+      oemRankings
+    );
+
+    if (augmentedSections) {
+      productKnowledgeBase += augmentedSections;
+      console.log(`✅ Augmented knowledge base with marketplace signals`);
+    }
 
     // Build system prompt with knowledge base
     const systemPrompt = `You are a helpful, friendly, and visually-oriented virtual assistant for SkySecure Marketplace, similar to Amazon's Rufus. Your role is to help customers with questions about products, services, pricing, and general inquiries.
@@ -308,10 +470,11 @@ BEHAVIOR RULES:
 
 RESPONSE FORMAT:
 When listing products, always include:
-- Product Name (bold)
+- Product Name (bold, and MAKE IT A LINK using the "Link:" field from data if available)
 - Vendor
 - Price / License (if shown in the data)
 - Category (if relevant)
+- Link (explicitly if not linked in name)
 
 EXAMPLE BEHAVIOR:
 - User asks: "What products are in Data Management?"
@@ -452,6 +615,9 @@ GENERAL INSTRUCTIONS:
 
 CRITICAL: All data is fetched LIVE from the SkySecure Marketplace API. There are NO hard-coded responses. If data is missing, it means the API returned no data, and you must clearly communicate this to the user.
 
+IMPORTANT: Marketplace Signals Clarification:
+"Best selling" and "featured" products are derived marketplace signals based on catalog prominence and heuristics, not real-time sales or order data. These signals are computed from product metadata, category rankings, and marketplace analytics to identify products that are likely to be popular or noteworthy.
+
 ABSOLUTE GUARDRAILS:
 1. NEVER say "no products found" unless semantic search returns no results AND no products found in category sections.
 2. If the user intent maps to a broad category, ask one clarifying question to narrow to a subcategory or OEM before recommending.
@@ -560,7 +726,7 @@ VISUAL FORMATTING REQUIREMENTS - MAKE ALL RESPONSES VISUALLY APPEALING:
    - Brief intro sentence (1-2 lines)
    - Table with columns: # | Product Name | Vendor 🏢 | Price 💰 | Category 🏷️ | Description
    - Table alignment: |:---|:---|:---:|---:|:---|:---|
-   - Example row: | 1 | **Product Name** | Microsoft | ₹12,345.67/Monthly | Software | Brief description... |
+   - Example row: | 1 | [**Product Name**](Link) | Microsoft | ₹12,345.67/Monthly | Software | Brief description... |
    - Horizontal rule: ---
    - Highlights section: ### 🎯 Highlights with bullet points for most affordable, most popular, key categories, and total products
    - Friendly closing line with emoji
@@ -571,7 +737,7 @@ VISUAL FORMATTING REQUIREMENTS - MAKE ALL RESPONSES VISUALLY APPEALING:
    - Add brief intro: "Here are all the SQL products available:"
    - Create a "### Search Results" section
    - For EACH SQL product, use this EXACT format:
-     **Product Name**
+     [**Product Name**](Link)
      Product Name
      ₹Price / BillingCycle
      - Include ALL products from "=== SQL PRODUCTS ===" section
