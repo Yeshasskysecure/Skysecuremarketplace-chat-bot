@@ -17,6 +17,9 @@ import { loadMarketplaceSignals, resolveProductsByIds } from "./utils/marketplac
 
 dotenv.config();
 
+// Global flag to track if products have been indexed for semantic search
+let isIndexed = false;
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -208,6 +211,12 @@ app.post("/api/chat", async (req, res) => {
     const baseUrl = process.env.KNOWLEDGE_BASE_URL || "https://shop.skysecure.ai/";
     let relevantContent = "";
 
+    // DYNAMIC: Parallelize data fetching for speed
+    console.log("🚀 Starting parallel data fetch...");
+    const productsPromise = loadProductsFromJSON();
+    const signalsPromise = loadMarketplaceSignals();
+    const categoryPromise = fetchCategoryHierarchy(); // Hoisted from below
+
     // DYNAMIC: resolveIntent is now async - await it
     const intentInfo = await resolveIntent(message, baseUrl);
     const conversationStage = inferConversationStage(conversationHistory, message, intentInfo);
@@ -220,33 +229,41 @@ app.post("/api/chat", async (req, res) => {
 
     // Load products from JSON file
     console.log("Loading products from products_normalized.json...");
-    const productsFromJSON = await loadProductsFromJSON();
+    const productsFromJSON = await productsPromise;
 
-    // Index products with embeddings for semantic search
-    if (productsFromJSON.length > 0 && needsUpdate()) {
-      console.log("Indexing products with embeddings for semantic search...");
+    // Index products with embeddings for semantic search - ONLY ONCE
+    if (productsFromJSON.length > 0 && !isIndexed) {
+      console.log("Indexing products with embeddings for semantic search (First Run)...");
       const productChunks = productsToTextChunks(productsFromJSON);
-      await Promise.race([
-        indexProductChunks(productChunks),
-        new Promise((resolve) => setTimeout(() => resolve(), 30000)) // 30s timeout for indexing
-      ]).catch(err => {
+
+      // Index in background or wait with timeout
+      try {
+        await Promise.race([
+          indexProductChunks(productChunks),
+          new Promise((resolve) => setTimeout(() => resolve(), 30000)) // 30s timeout
+        ]);
+        isIndexed = true;
+        console.log("✅ Semantic search indexing complete");
+      } catch (err) {
         console.warn("Product indexing failed, continuing without semantic search:", err.message);
-      });
+      }
     } else if (productsFromJSON.length > 0) {
-      console.log("Using cached product embeddings (no re-indexing needed)");
+      console.log("Using cached product embeddings (already indexed)");
     }
 
-    // Get relevant content using semantic search on products
-    if (productsFromJSON.length > 0) {
+    // Get relevant content using semantic search on products (only if indexed)
+    let relevantContentPromise = Promise.resolve("");
+    if (productsFromJSON.length > 0 && isIndexed) {
       console.log("Finding relevant products using semantic search...");
-      relevantContent = await Promise.race([
+      relevantContentPromise = Promise.race([
         getRelevantContent(message, 10), // Get top 10 relevant products
-        new Promise((resolve) => setTimeout(() => resolve(""), 5000)) // 5s timeout
+        new Promise((resolve) => setTimeout(() => resolve(""), 2000)) // 2s timeout
       ]).catch(err => {
         console.warn("Semantic search failed:", err.message);
         return "";
       });
-      console.log(`Semantic search returned ${relevantContent.length} characters of relevant content`);
+    } else {
+      if (!isIndexed) console.log("Skipping semantic search - Index not ready yet");
     }
 
     // Use products loaded from JSON file
@@ -256,7 +273,11 @@ app.post("/api/chat", async (req, res) => {
 
     // Load marketplace signals and enrich products
     console.log("Loading marketplace signals...");
-    const { marketplaceSignals, categoryRankings, oemRankings } = await loadMarketplaceSignals();
+    const { marketplaceSignals, categoryRankings, oemRankings } = await signalsPromise;
+
+    // Await semantic search result
+    relevantContent = await relevantContentPromise;
+    console.log(`Semantic search returned ${relevantContent.length} characters of relevant content`);
 
     // Enrich products with marketplace signals (set flags)
     if (marketplaceSignals) {
@@ -384,12 +405,12 @@ app.post("/api/chat", async (req, res) => {
       console.error("3. API authentication or permission issues");
     }
 
-    // Fetch category hierarchy and OEMs
-    console.log("Fetching category hierarchy and OEMs...");
+    // Fetch category hierarchy and OEMs (use promise from start)
+    console.log("Fetching category hierarchy and OEMs (awaiting promise)...");
     let categoryHierarchy = "";
     try {
       const categoryData = await Promise.race([
-        fetchCategoryHierarchy(),
+        categoryPromise,
         new Promise((_, reject) => setTimeout(() => reject(new Error("Category API timeout")), 15000)) // 15s timeout
       ]);
 
@@ -428,6 +449,19 @@ app.post("/api/chat", async (req, res) => {
 
     // Build system prompt with knowledge base
     const systemPrompt = `You are a helpful, friendly, and visually-oriented virtual assistant for SkySecure Marketplace, similar to Amazon's Rufus. Your role is to help customers with questions about products, services, pricing, and general inquiries.
+
+⛔ OUT OF SCOPE / OFF-TOPIC QUESTIONS:
+If the user asks about topics COMPLETELY UNRELATED to:
+- Software products, IT, cloud services, security, or technology
+- SkySecure Marketplace features, pricing, or support
+- General business/enterprise software inquiries
+
+(Examples of off-topic: "How's the weather?", "Who won the cricket match?", "Write a poem about cats", "Solve this math problem", "politics", "movies", etc.)
+
+YOU MUST RESPOND WITH:
+"I am the SkySecure Marketplace assistant. I can only help you with questions about our software products, services, and features. How can I assist you with your IT or software needs today?"
+
+DO NOT attempt to answer the off-topic question. politely decline and pivot back to the marketplace.
 
 IMPORTANT: Format all responses in a visually appealing way using markdown. Use clear headings, bullet points, tables, bold text, and proper spacing to make responses easy to read and engaging.
 

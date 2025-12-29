@@ -1,7 +1,7 @@
 import { makeRequest } from "./httpClient.js";
 
-const PRODUCT_SERVICE_BACKEND_URL = process.env.PRODUCT_SERVICE_BACKEND_URL || 
-  process.env.NEXT_PUBLIC_PRODUCT_SERVICE_BACKEND_URL || 
+const PRODUCT_SERVICE_BACKEND_URL = process.env.PRODUCT_SERVICE_BACKEND_URL ||
+  process.env.NEXT_PUBLIC_PRODUCT_SERVICE_BACKEND_URL ||
   "https://devshop-backend.skysecure.ai/api/product";
 
 // Cache for category and OEM data (refresh every 10 minutes)
@@ -18,8 +18,8 @@ let categoryCache = {
 export async function fetchCategoryHierarchy() {
   try {
     const now = Date.now();
-    if (categoryCache.data && categoryCache.lastFetch && 
-        (now - categoryCache.lastFetch) < categoryCache.ttl) {
+    if (categoryCache.data && categoryCache.lastFetch &&
+      (now - categoryCache.lastFetch) < categoryCache.ttl) {
       console.log("Using cached category data");
       return categoryCache.data;
     }
@@ -41,7 +41,7 @@ export async function fetchCategoryHierarchy() {
       } else if (categoryData?.data && Array.isArray(categoryData.data)) {
         categories = categoryData.data;
       }
-      
+
       // Log category structure for debugging
       if (categories.length > 0) {
         const firstCategory = categories[0];
@@ -51,7 +51,7 @@ export async function fetchCategoryHierarchy() {
           subcategoryCount: (firstCategory.subcategories || firstCategory.subCategories || []).length
         });
       }
-      
+
       console.log(`Fetched ${categories.length} categories with hierarchy`);
     } else {
       console.warn(`Category API returned status ${categoryResponse.status}`);
@@ -120,7 +120,7 @@ export function formatCategoryHierarchyForKnowledgeBase(categories, oems, produc
     categories.forEach((category, index) => {
       const categoryName = category.name || category.title || `Category ${index + 1}`;
       const categoryId = category._id || category.id;
-      
+
       // Count products in this category - check multiple possible field names
       const productsInCategory = products.filter(p => {
         // Check direct category name match
@@ -145,7 +145,7 @@ export function formatCategoryHierarchyForKnowledgeBase(categories, oems, produc
         subCategories.forEach((subCategory, subIndex) => {
           const subCategoryName = subCategory.name || subCategory.title || `Sub-category ${subIndex + 1}`;
           const subCategoryId = subCategory._id || subCategory.id;
-          
+
           // Count products in this sub-category - check multiple possible field names
           const productsInSubCategory = products.filter(p => {
             // Check direct sub-category name match
@@ -170,7 +170,7 @@ export function formatCategoryHierarchyForKnowledgeBase(categories, oems, produc
             subSubCategories.forEach((subSubCategory, subSubIndex) => {
               const subSubCategoryName = subSubCategory.name || subSubCategory.title || `Sub-sub-category ${subSubIndex + 1}`;
               const subSubCategoryId = subSubCategory._id || subSubCategory.id;
-              
+
               // Count products in this sub-sub-category - check multiple possible field names
               const productsInSubSubCategory = products.filter(p => {
                 // Check direct sub-sub-category name match
@@ -202,14 +202,14 @@ export function formatCategoryHierarchyForKnowledgeBase(categories, oems, produc
   knowledgeBase += `\n=== ORIGINAL EQUIPMENT MANUFACTURERS (OEMs) ===\n\n`;
   knowledgeBase += `OEMs (Original Equipment Manufacturers) are vendors/brands that provide products in SkySecure Marketplace.\n`;
   knowledgeBase += `OEMs are separate from categories and represent companies like Microsoft, Google, Adobe, Intel, AWS, etc.\n\n`;
-  
+
   if (!oems || oems.length === 0) {
     knowledgeBase += `No OEMs available from API.\n\n`;
   } else {
     knowledgeBase += `Available OEMs:\n`;
     oems.forEach((oem, index) => {
       const oemName = oem.title || oem.name || `OEM ${index + 1}`;
-      
+
       // Count products from this OEM - check multiple possible field names
       const productsFromOEM = products.filter(p => {
         // Check direct vendor name match
