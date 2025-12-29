@@ -9,6 +9,13 @@ let productCache = {
   ttl: 5 * 60 * 1000, // 5 minutes
 };
 
+// Cache for formatted knowledge base
+let kbCache = {
+  base: null, // Basic version (categories, featured, top selling, recent)
+  full: null, // Full version (includes all products list)
+  lastUpdate: null
+};
+
 const PRODUCT_SERVICE_BACKEND_URL = process.env.PRODUCT_SERVICE_BACKEND_URL ||
   process.env.NEXT_PUBLIC_PRODUCT_SERVICE_BACKEND_URL ||
   "https://devshop-backend.skysecure.ai/api/product";
@@ -810,11 +817,64 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
 }
 
 /**
+ * Helper to format price details from product
+ */
+function formatPriceDetails(product) {
+  let details = [];
+
+  // 1. Check for subscriptions array (from API)
+  if (product.subscriptions && product.subscriptions.length > 0) {
+    product.subscriptions.forEach(sub => {
+      const price = sub.sellingPrice || sub.price || 0;
+      const plan = sub.plan || "Monthly";
+      const formattedPrice = price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      details.push(`₹${formattedPrice}/${plan}`);
+    });
+  }
+  // 2. Check for pricing object (from JSON)
+  else if (product.pricing && Object.keys(product.pricing).length > 0) {
+    if (product.pricing.monthly) {
+      const formattedPrice = product.pricing.monthly.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      details.push(`₹${formattedPrice}/Monthly`);
+    }
+    if (product.pricing.yearly) {
+      const formattedPrice = product.pricing.yearly.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      details.push(`₹${formattedPrice}/Yearly`);
+    }
+    if (product.pricing.oneTime) {
+      const formattedPrice = product.pricing.oneTime.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      details.push(`₹${formattedPrice}/One Time`);
+    }
+  }
+
+  // 3. Fallback to product-level price/billingCycle
+  if (details.length === 0) {
+    const price = product.price || 0;
+    const cycle = product.billingCycle || "Monthly";
+    const formattedPrice = price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `₹${formattedPrice}/${cycle}`;
+  }
+
+  return details.join(" | ");
+}
+
+/**
  * Formats product data into a knowledge base string
  * @param {Array} products - Array of product objects
+ * @param {boolean} includeFullList - Whether to include the ALL PRODUCTS LIST section (expensive!)
  * @returns {string} - Formatted product knowledge base
  */
-export function formatProductsForKnowledgeBase(products) {
+export function formatProductsForKnowledgeBase(products, includeFullList = false) {
+  if (!products || products.length === 0) {
+    return "No product information available at this time. Unable to fetch live marketplace data from the API.";
+  }
+
+  // Check cache first
+  const cacheKey = includeFullList ? 'full' : 'base';
+  if (kbCache[cacheKey] && kbCache.lastUpdate && (Date.now() - kbCache.lastUpdate < productCache.ttl)) {
+    console.log(`Using cached ${cacheKey} knowledge base`);
+    return kbCache[cacheKey];
+  }
   if (!products || products.length === 0) {
     return "No product information available at this time. Unable to fetch live marketplace data from the API.";
   }
@@ -858,7 +918,7 @@ export function formatProductsForKnowledgeBase(products) {
       subCatProducts
         .sort((a, b) => (b.price || 0) - (a.price || 0)) // Sort by price descending
         .forEach((product) => {
-          knowledgeBase += `  - ${product.name} (${product.vendor}): ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
+          knowledgeBase += `  - ${product.name} (${product.vendor}): ${formatPriceDetails(product)}\n`;
           if (product.url) knowledgeBase += `    Link: ${product.url}\n`;
         });
       knowledgeBase += `\n`;
@@ -915,22 +975,7 @@ export function formatProductsForKnowledgeBase(products) {
       knowledgeBase += `   ${product.name}\n`; // Duplicate name for search results format
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
 
-      // Get all subscription options if available
-      const subscriptions = product.subscriptions || [];
-      if (subscriptions.length > 0) {
-        subscriptions.forEach((sub, subIdx) => {
-          const price = sub.sellingPrice || sub.price || 0;
-          const plan = sub.plan || "Monthly";
-          const formattedPrice = price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          knowledgeBase += `   Price Option ${subIdx + 1}: ₹${formattedPrice} / ${plan}\n`;
-        });
-      } else {
-        // Fallback to product-level price
-        const price = product.price || 0;
-        const billingCycle = product.billingCycle || "Monthly";
-        const formattedPrice = price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        knowledgeBase += `   Price: ₹${formattedPrice} / ${billingCycle}\n`;
-      }
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
 
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       if (product.id) {
@@ -974,7 +1019,7 @@ export function formatProductsForKnowledgeBase(products) {
     emailCollabProducts.forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
-      knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       if (product.url) {
         knowledgeBase += `   Link: ${product.url}\n`;
@@ -987,22 +1032,26 @@ export function formatProductsForKnowledgeBase(products) {
     knowledgeBase += `=== END EMAIL & COLLABORATION PRODUCTS ===\n\n`;
   }
 
-  // Add ALL products list (comprehensive)
-  knowledgeBase += `\nALL PRODUCTS LIST:\n`;
-  products.slice(0, 100).forEach((product, index) => {
-    knowledgeBase += `${index + 1}. ${product.name} (${product.vendor})\n`;
-    knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-    knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
-    if (product.url) {
-      knowledgeBase += `   Link: ${product.url}\n`;
+  if (includeFullList) {
+    // Add ALL products list (comprehensive)
+    knowledgeBase += `\nALL PRODUCTS LIST:\n`;
+    products.slice(0, 100).forEach((product, index) => {
+      knowledgeBase += `${index + 1}. ${product.name} (${product.vendor})\n`;
+      knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
+      if (product.url) {
+        knowledgeBase += `   Link: ${product.url}\n`;
+      }
+      if (product.description) {
+        knowledgeBase += `   Description: ${product.description.substring(0, 100)}...\n`;
+      }
+      knowledgeBase += `\n`;
+    });
+    if (products.length > 100) {
+      knowledgeBase += `... and ${products.length - 100} more products\n\n`;
     }
-    if (product.description) {
-      knowledgeBase += `   Description: ${product.description.substring(0, 100)}...\n`;
-    }
-    knowledgeBase += `\n`;
-  });
-  if (products.length > 100) {
-    knowledgeBase += `... and ${products.length - 100} more products\n\n`;
+  } else {
+    knowledgeBase += `\nNOTE: The comprehensive product list is omitted for brevity. Use semantic search results to find specific products.\n\n`;
   }
 
   // Add featured products - CRITICAL SECTION
@@ -1013,7 +1062,7 @@ export function formatProductsForKnowledgeBase(products) {
     featured.forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
-      knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       if (product.url) {
         knowledgeBase += `   Link: ${product.url}\n`;
@@ -1040,7 +1089,7 @@ export function formatProductsForKnowledgeBase(products) {
     topSelling.slice(0, 50).forEach((product, index) => { // Limit to 50 for token management
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
-      knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       if (product.url) {
         knowledgeBase += `   Link: ${product.url}\n`;
@@ -1076,7 +1125,7 @@ export function formatProductsForKnowledgeBase(products) {
     sortedRecentlyAdded.forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
-      knowledgeBase += `   Price: ₹${product.price || 0}/${product.billingCycle || "Monthly"}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       if (product.url) {
         knowledgeBase += `   Link: ${product.url}\n`;
@@ -1106,11 +1155,15 @@ export function formatProductsForKnowledgeBase(products) {
 
     if (sortedByPrice.length > 0) {
       const mostExpensive = sortedByPrice[0];
-      knowledgeBase += `Most Expensive in ${category}: ${mostExpensive.name} - ₹${mostExpensive.price}/${mostExpensive.billingCycle}\n`;
+      knowledgeBase += `Most Expensive in ${category}: ${mostExpensive.name} - ${formatPriceDetails(mostExpensive)}\n`;
     }
   });
 
   knowledgeBase += `\n=== END PRODUCT DATA ===\n`;
+
+  // Update cache
+  kbCache[cacheKey] = knowledgeBase;
+  kbCache.lastUpdate = Date.now();
 
   return knowledgeBase;
 }

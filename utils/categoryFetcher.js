@@ -11,6 +11,13 @@ let categoryCache = {
   ttl: 10 * 60 * 1000, // 10 minutes
 };
 
+// Cache for formatted hierarchy string
+let hierarchyCache = {
+  formattedString: null,
+  productCount: 0,
+  lastUpdate: null
+};
+
 /**
  * Fetches hierarchical category structure from the API
  * @returns {Promise<Object>} - Category hierarchy with sub-categories
@@ -109,6 +116,15 @@ export async function fetchCategoryHierarchy() {
  * @returns {string} - Formatted category knowledge base
  */
 export function formatCategoryHierarchyForKnowledgeBase(categories, oems, products) {
+  // Check cache first
+  if (hierarchyCache.formattedString &&
+    hierarchyCache.productCount === products.length &&
+    hierarchyCache.lastUpdate &&
+    (Date.now() - hierarchyCache.lastUpdate < categoryCache.ttl)) {
+    console.log("Using cached formatted category hierarchy");
+    return hierarchyCache.formattedString;
+  }
+
   let knowledgeBase = `\n=== MARKETPLACE CATEGORY HIERARCHY (Live Data from API) ===\n\n`;
   knowledgeBase += `This section shows the COMPLETE hierarchical structure of categories in SkySecure Marketplace.\n`;
   knowledgeBase += `Main categories are numbered (1., 2., etc.), sub-categories are indented (1.1, 1.2, etc.), and sub-sub-categories are further indented (1.1.1, 1.1.2, etc.).\n\n`;
@@ -231,6 +247,11 @@ export function formatCategoryHierarchyForKnowledgeBase(categories, oems, produc
     });
   }
   knowledgeBase += `=== END OEMs ===\n\n`;
+
+  // Update cache
+  hierarchyCache.formattedString = knowledgeBase;
+  hierarchyCache.productCount = products.length;
+  hierarchyCache.lastUpdate = Date.now();
 
   return knowledgeBase;
 }

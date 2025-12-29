@@ -211,14 +211,15 @@ app.post("/api/chat", async (req, res) => {
     const baseUrl = process.env.KNOWLEDGE_BASE_URL || "https://shop.skysecure.ai/";
     let relevantContent = "";
 
-    // DYNAMIC: Parallelize data fetching for speed
-    console.log("🚀 Starting parallel data fetch...");
+    // DYNAMIC: Parallelize data fetching and intent resolution for speed
+    console.log("🚀 Starting parallel data fetch and intent resolution...");
     const productsPromise = loadProductsFromJSON();
     const signalsPromise = loadMarketplaceSignals();
-    const categoryPromise = fetchCategoryHierarchy(); // Hoisted from below
+    const categoryPromise = fetchCategoryHierarchy();
+    const intentPromise = resolveIntent(message, baseUrl);
 
-    // DYNAMIC: resolveIntent is now async - await it
-    const intentInfo = await resolveIntent(message, baseUrl);
+    // Await intent resolution early as it's needed for stage inference
+    const intentInfo = await intentPromise;
     const conversationStage = inferConversationStage(conversationHistory, message, intentInfo);
 
     // Track conversation state using new conversation manager
@@ -429,9 +430,9 @@ app.post("/api/chat", async (req, res) => {
     let listingProductsSection = "";
     console.log("✅ Using products from JSON file - skipping website scraping to avoid timeouts");
 
-    // Re-format knowledge base with products from JSON
-    let productKnowledgeBase = formatProductsForKnowledgeBase(products);
-    console.log(`Product knowledge base created: ${productKnowledgeBase.length} characters`);
+    // Re-format knowledge base with products from JSON - Use LIMITED version for faster response
+    let productKnowledgeBase = formatProductsForKnowledgeBase(productsFromJSON, false);
+    console.log(`Product knowledge base created: ${productKnowledgeBase.length} characters (Limited version)`);
 
     // Augment knowledge base with marketplace signals based on query intent
     const augmentedSections = augmentKnowledgeBaseWithSignals(
@@ -612,7 +613,7 @@ EXAMPLES:
 GENERAL INSTRUCTIONS:
 1. ALWAYS check the product data sections FIRST before saying something doesn't exist - use semantic search and category sections
 2. Use the EXACT product names, prices, and vendors from the data - DO NOT make up or assume any information - NEVER infer or assume availability
-3. Format prices as ₹{amount}/{billingCycle} (e.g., ₹66,599/Monthly) - use comma separators for thousands
+3. Format prices as ₹{amount}/{billingCycle} (e.g., ₹66,599/Monthly). If multiple pricing options (e.g., Monthly and Yearly) are available in the data, list ALL of them.
 4. Include product descriptions when available in the data - ONLY if present in the data provided
 5. Be specific and detailed - don't give generic responses, but ONLY use information from the data provided
 6. If you see a section with products, LIST THEM - don't say they don't exist, even if the category counter shows 0

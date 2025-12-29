@@ -27,16 +27,16 @@ export async function createEmbeddings(chunks) {
     // Limit chunks to prevent memory issues
     const maxChunks = 100;
     const limitedChunks = chunks.slice(0, maxChunks);
-    
+
     if (chunks.length > maxChunks) {
       console.warn(`Limiting embeddings to ${maxChunks} chunks (out of ${chunks.length}) to prevent memory issues`);
     }
 
     console.log(`Creating embeddings for ${limitedChunks.length} chunks...`);
-    
+
     // Ensure endpoint has trailing slash
-    const endpoint = AZURE_OPENAI_ENDPOINT.endsWith('/') 
-      ? AZURE_OPENAI_ENDPOINT 
+    const endpoint = AZURE_OPENAI_ENDPOINT.endsWith('/')
+      ? AZURE_OPENAI_ENDPOINT
       : AZURE_OPENAI_ENDPOINT + '/';
     const apiUrl = `${endpoint}openai/deployments/${EMBEDDING_DEPLOYMENT}/embeddings?api-version=${API_VERSION}`;
 
@@ -46,7 +46,7 @@ export async function createEmbeddings(chunks) {
 
     for (let i = 0; i < limitedChunks.length; i += batchSize) {
       const batch = limitedChunks.slice(i, i + batchSize);
-      
+
       try {
         const response = await makeRequest(apiUrl, {
           method: 'POST',
@@ -65,7 +65,7 @@ export async function createEmbeddings(chunks) {
         }
 
         const responseData = await response.json();
-        
+
         if (responseData.data && Array.isArray(responseData.data)) {
           const batchEmbeddings = responseData.data.map(item => item.embedding);
           allEmbeddings.push(...batchEmbeddings);
@@ -73,9 +73,9 @@ export async function createEmbeddings(chunks) {
 
         // Clear response data from memory
         responseData = null;
-        
-        // Longer delay between batches to allow GC
-        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Shorter delay between batches to improve speed
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (error) {
         console.error(`Error in embedding batch ${i}:`, error.message);
         continue;
@@ -101,20 +101,20 @@ export function chunkText(text, chunkSize = 800, overlap = 100) {
   // Limit total text size to prevent memory issues
   const maxTextSize = 50000; // 50KB max
   const limitedText = text.length > maxTextSize ? text.substring(0, maxTextSize) : text;
-  
+
   const chunks = [];
   let start = 0;
 
   while (start < limitedText.length) {
     const end = Math.min(start + chunkSize, limitedText.length);
     const chunk = limitedText.substring(start, end).trim();
-    
+
     if (chunk.length > 50) { // Only add meaningful chunks
       chunks.push(chunk);
     }
-    
+
     start = end - overlap; // Overlap for context
-    
+
     // Limit total chunks
     if (chunks.length >= 100) {
       break;
@@ -132,7 +132,7 @@ export function chunkText(text, chunkSize = 800, overlap = 100) {
  */
 function cosineSimilarity(vec1, vec2) {
   if (vec1.length !== vec2.length) return 0;
-  
+
   let dotProduct = 0;
   let norm1 = 0;
   let norm2 = 0;
@@ -189,7 +189,7 @@ export async function findRelevantChunks(query, topK = 5) {
 export async function indexContent(content) {
   try {
     console.log("Indexing content with embeddings...");
-    
+
     // Split content into chunks
     const chunks = chunkText(content, 1000, 200);
     console.log(`Split into ${chunks.length} chunks`);
@@ -217,7 +217,7 @@ export async function indexContent(content) {
 export async function indexProductChunks(productChunks) {
   try {
     console.log(`Indexing ${productChunks.length} product chunks with embeddings...`);
-    
+
     if (productChunks.length === 0) {
       console.warn("No product chunks to index");
       return;
@@ -255,7 +255,7 @@ export async function indexProductChunks(productChunks) {
 export async function getRelevantContent(query, topK = 10) {
   try {
     const relevantChunks = await findRelevantChunks(query, topK);
-    
+
     if (relevantChunks.length === 0) {
       return "";
     }

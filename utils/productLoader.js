@@ -202,7 +202,17 @@ export function productsToTextChunks(products) {
       chunk += `Vendor: ${product.vendor}\n`;
     }
 
-    if (product.price > 0) {
+    // Include all pricing options
+    if (product.pricing && Object.keys(product.pricing).length > 0) {
+      const prices = [];
+      if (product.pricing.monthly) prices.push(`₹${product.pricing.monthly.toLocaleString('en-IN')} / Monthly`);
+      if (product.pricing.yearly) prices.push(`₹${product.pricing.yearly.toLocaleString('en-IN')} / Yearly`);
+      if (product.pricing.oneTime) prices.push(`₹${product.pricing.oneTime.toLocaleString('en-IN')} / One Time`);
+
+      if (prices.length > 0) {
+        chunk += `Pricing: ${prices.join(' | ')}\n`;
+      }
+    } else if (product.price > 0) {
       chunk += `Price: ₹${product.price.toLocaleString('en-IN')} / ${product.billingCycle}\n`;
     }
 
