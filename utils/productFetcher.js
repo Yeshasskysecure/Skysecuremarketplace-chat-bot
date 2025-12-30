@@ -985,23 +985,24 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (sqlProducts.length > 0) {
     knowledgeBase += `\n=== SQL PRODUCTS (${sqlProducts.length} products) ===\n`;
     knowledgeBase += `These are ALL SQL and database-related products in SkySecure Marketplace. When a user asks about SQL products, you MUST list ALL of these products with their full details:\n\n`;
-    sqlProducts.forEach((product, index) => {
+    sqlProducts.slice(0, 20).forEach((product, index) => {
       knowledgeBase += `${index + 1}. **${product.name}**\n`;
       knowledgeBase += `   ${product.name}\n`; // Duplicate name for search results format
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
-
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
-
-      knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      if (product.id) {
-        knowledgeBase += `   Product ID: ${product.id}\n`;
-        knowledgeBase += `   Link: https://shop.skysecure.ai/product/${product.id}\n`;
+      if (product.category) knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (link) {
+        knowledgeBase += `   Link: ${link}\n`;
       }
       if (product.description) {
-        knowledgeBase += `   Description: ${product.description.substring(0, 200)}\n`;
+        knowledgeBase += `   Description: ${product.description.substring(0, 100)}\n`;
       }
       knowledgeBase += `\n`;
     });
+    if (sqlProducts.length > 20) {
+      knowledgeBase += `... and ${sqlProducts.length - 20} more SQL products\n\n`;
+    }
     knowledgeBase += `=== END SQL PRODUCTS ===\n\n`;
     knowledgeBase += `CRITICAL: When a user asks "what are the SQL products" or "SQL products being sold", you MUST:\n`;
     knowledgeBase += `1. List ALL products from the "=== SQL PRODUCTS ===" section above\n`;
@@ -1031,19 +1032,23 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (emailCollabProducts.length > 0) {
     knowledgeBase += `\n=== EMAIL & COLLABORATION PRODUCTS (${emailCollabProducts.length} products) ===\n`;
     knowledgeBase += `These are ALL Email and Collaboration Tools in SkySecure Marketplace:\n\n`;
-    emailCollabProducts.forEach((product, index) => {
+    emailCollabProducts.slice(0, 20).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      if (product.url) {
-        knowledgeBase += `   Link: ${product.url}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (link) {
+        knowledgeBase += `   Link: ${link}\n`;
       }
       if (product.description) {
-        knowledgeBase += `   Description: ${product.description.substring(0, 150)}...\n`;
+        knowledgeBase += `   Description: ${product.description.substring(0, 100)}\n`;
       }
       knowledgeBase += `\n`;
     });
+    if (emailCollabProducts.length > 20) {
+      knowledgeBase += `... and ${emailCollabProducts.length - 20} more email/collaboration products\n\n`;
+    }
     knowledgeBase += `=== END EMAIL & COLLABORATION PRODUCTS ===\n\n`;
   }
 
@@ -1054,8 +1059,9 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `${index + 1}. ${product.name} (${product.vendor})\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
-      if (product.url) {
-        knowledgeBase += `   Link: ${product.url}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (link) {
+        knowledgeBase += `   Link: ${link}\n`;
       }
       if (product.description) {
         knowledgeBase += `   Description: ${product.description.substring(0, 100)}...\n`;
@@ -1074,19 +1080,23 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (featured.length > 0) {
     knowledgeBase += `\n=== FEATURED PRODUCTS (${featured.length} products) ===\n`;
     knowledgeBase += `These are the FEATURED products in SkySecure Marketplace:\n\n`;
-    featured.forEach((product, index) => {
+    featured.slice(0, 10).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      if (product.url) {
-        knowledgeBase += `   Link: ${product.url}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (link) {
+        knowledgeBase += `   Link: ${link}\n`;
       }
       if (product.description) {
-        knowledgeBase += `   Description: ${product.description.substring(0, 150)}...\n`;
+        knowledgeBase += `   Description: ${product.description.substring(0, 80)}...\n`;
       }
       knowledgeBase += `\n`;
     });
+    if (featured.length > 10) {
+      knowledgeBase += `... and ${featured.length - 10} more featured products\n\n`;
+    }
     knowledgeBase += `=== END FEATURED PRODUCTS ===\n\n`;
   } else {
     knowledgeBase += `\n=== FEATURED PRODUCTS (0 products) ===\n`;
@@ -1101,21 +1111,22 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (topSelling.length > 0) {
     knowledgeBase += `\n=== TOP SELLING / BEST SELLING PRODUCTS (${topSelling.length} products) ===\n`;
     knowledgeBase += `These are the BEST SELLING products in SkySecure Marketplace:\n\n`;
-    topSelling.slice(0, 50).forEach((product, index) => { // Limit to 50 for token management
+    topSelling.slice(0, 10).forEach((product, index) => { // Limit to 10 for token management
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      if (product.url) {
-        knowledgeBase += `   Link: ${product.url}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (link) {
+        knowledgeBase += `   Link: ${link}\n`;
       }
       if (product.description) {
-        knowledgeBase += `   Description: ${product.description.substring(0, 150)}...\n`;
+        knowledgeBase += `   Description: ${product.description.substring(0, 80)}...\n`;
       }
       knowledgeBase += `\n`;
     });
-    if (topSelling.length > 50) {
-      knowledgeBase += `... and ${topSelling.length - 50} more best selling products\n\n`;
+    if (topSelling.length > 10) {
+      knowledgeBase += `... and ${topSelling.length - 10} more best selling products\n\n`;
     }
     knowledgeBase += `=== END BEST SELLING PRODUCTS ===\n\n`;
   } else {
@@ -1137,23 +1148,23 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
 
     knowledgeBase += `\n=== RECENTLY ADDED PRODUCTS (${sortedRecentlyAdded.length} products) ===\n`;
     knowledgeBase += `These are the RECENTLY ADDED products in SkySecure Marketplace:\n\n`;
-    sortedRecentlyAdded.forEach((product, index) => {
+    sortedRecentlyAdded.slice(0, 10).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      if (product.url) {
-        knowledgeBase += `   Link: ${product.url}\n`;
-      }
-      if (product.createdAt) {
-        const date = new Date(product.createdAt);
-        knowledgeBase += `   Added: ${date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (link) {
+        knowledgeBase += `   Link: ${link}\n`;
       }
       if (product.description) {
-        knowledgeBase += `   Description: ${product.description.substring(0, 150)}...\n`;
+        knowledgeBase += `   Description: ${product.description.substring(0, 80)}...\n`;
       }
       knowledgeBase += `\n`;
     });
+    if (sortedRecentlyAdded.length > 10) {
+      knowledgeBase += `... and ${sortedRecentlyAdded.length - 10} more recently added products\n\n`;
+    }
     knowledgeBase += `=== END RECENTLY ADDED PRODUCTS ===\n\n`;
   } else {
     knowledgeBase += `\n=== RECENTLY ADDED PRODUCTS (0 products) ===\n`;

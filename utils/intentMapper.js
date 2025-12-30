@@ -33,7 +33,7 @@ const fallbackSubCategoryMap = [
   {
     id: "6942ac3ed91c1f7c88d02b83",
     names: ["governance", "compliance", "governance and compliance", "regulatory", "audit"],
-    label: "Governance and Compliance"
+    label: "Governance And Compliance"
   },
   {
     id: "6942ac2dd91c1f7c88d02b75",
@@ -222,6 +222,11 @@ export async function resolveIntent(message, baseUrl = "https://shop.skysecure.a
     const base = new URL(baseUrl);
     if (matches.subCategoryId) {
       listingUrls.push(`${base.origin}/products?subCategoryId=${matches.subCategoryId}`);
+      // Add search fallback for subcategory
+      if (matches.categoryName) {
+        const searchParam = encodeURIComponent(matches.categoryName);
+        listingUrls.push(`${base.origin}/products?search=${searchParam}`);
+      }
     }
     if (matches.oemId) {
       listingUrls.push(`${base.origin}/products?oemId=${matches.oemId}`);

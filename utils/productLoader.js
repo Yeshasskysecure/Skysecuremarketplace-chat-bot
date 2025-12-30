@@ -243,7 +243,7 @@ export function productsToTextChunks(products) {
     }
 
     if (product.url) {
-      chunk += `URL: ${product.url}\n`;
+      chunk += `Link: ${product.url}\n`;
     }
 
     // Add full product name for better searchability
