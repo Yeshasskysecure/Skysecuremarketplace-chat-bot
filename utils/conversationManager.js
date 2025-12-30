@@ -24,7 +24,7 @@ export function trackConversationState(conversationHistory = [], currentMessage 
   const history = conversationHistory || [];
   const messageCount = history.length;
   const lower = (currentMessage || '').toLowerCase();
-  
+
   // Initialize state
   const state = {
     stage: ConversationStage.DISCOVERY,
@@ -75,7 +75,7 @@ export function trackConversationState(conversationHistory = [], currentMessage 
     // Check for conversion signals
     const conversionKeywords = ['buy', 'purchase', 'price', 'cost', 'how much', 'checkout', 'order'];
     const hasConversionIntent = conversionKeywords.some(keyword => lower.includes(keyword));
-    
+
     if (hasConversionIntent) {
       state.stage = ConversationStage.CONVERSION;
       state.confidence = 0.9;
@@ -163,6 +163,8 @@ BEHAVIOR:
 - Explain WHY each product is a good fit based on their stated needs
 - Highlight key features relevant to their use case
 - Mention pricing if available
+- ALWAYS include the direct "Link:" from the data for each recommended product
+- Mention pricing clearly for each option
 - Offer to compare options if they're unsure
 - DO NOT dump a list of all products - be selective and strategic
 
@@ -186,9 +188,9 @@ BEHAVIOR:
 - Soft upsell: mention upgrade paths only if genuinely beneficial
 
 EXAMPLE RESPONSES:
-- "Microsoft 365 Business Premium is ₹X/month per user. You can purchase it here: [link]"
+- "Microsoft 365 Business Premium is ₹X/month per user. You can purchase it here: [Direct Link from Data]"
 - "If your team grows beyond 50 people, you might want to consider the E3 plan for better scalability."
-- "Would you like help with the checkout process, or do you have any other questions?"
+- "Would you like help with the checkout process, or do you have any other questions regarding the purchase of [Product Name]?"
 
 TRANSITION: Offer continued support or return to Discovery if user has new questions.
 `,
@@ -208,22 +210,22 @@ export function generateGuidingQuestion(stage, intent = {}, products = []) {
   switch (stage) {
     case ConversationStage.DISCOVERY:
       return "To help you find the perfect solution, could you tell me a bit about your team size or business type?";
-    
+
     case ConversationStage.NARROWING:
       if (intent.categoryName) {
         return `Great! For ${intent.categoryName}, do you have any specific requirements like pricing range or features you need?`;
       }
       return "What's most important to you - collaboration tools, security features, or cloud storage?";
-    
+
     case ConversationStage.RECOMMENDATION:
       if (products && products.length > 1) {
         return "Would you like me to compare these options for you, or do you have questions about a specific product?";
       }
       return "Does this solution meet your needs, or would you like to explore other options?";
-    
+
     case ConversationStage.CONVERSION:
       return "Would you like the direct link to purchase, or do you have any final questions?";
-    
+
     default:
       return "How can I help you find the right solution today?";
   }
@@ -242,19 +244,19 @@ export function suggestQuickReplies(stage, intent = {}) {
       { text: "Enterprise (50+)", value: "enterprise" },
       { text: "Individual Use", value: "individual" },
     ],
-    
+
     [ConversationStage.NARROWING]: [
       { text: "Email & Collaboration", value: "email_collaboration" },
       { text: "Security & Compliance", value: "security" },
       { text: "Cloud Storage", value: "cloud_storage" },
     ],
-    
+
     [ConversationStage.RECOMMENDATION]: [
       { text: "Compare Options", value: "compare" },
       { text: "Show Pricing", value: "pricing" },
       { text: "See Features", value: "features" },
     ],
-    
+
     [ConversationStage.CONVERSION]: [
       { text: "View Product Page", value: "product_page" },
       { text: "Contact Sales", value: "contact_sales" },
@@ -292,9 +294,9 @@ export function extractUserPreferences(conversationHistory = []) {
 
   conversationHistory.forEach(msg => {
     if (msg.from !== 'user') return;
-    
+
     const text = (msg.text || '').toLowerCase();
-    
+
     // Extract team size
     const teamSizeMatch = text.match(/(\d+)\s*(people|employees|users|team)/i);
     if (teamSizeMatch) {
@@ -305,13 +307,13 @@ export function extractUserPreferences(conversationHistory = []) {
         preferences.businessType = 'enterprise';
       }
     }
-    
+
     // Extract budget
     const budgetMatch = text.match(/budget.*?(\d+)/i) || text.match(/₹\s*(\d+)/);
     if (budgetMatch) {
       preferences.budget = parseInt(budgetMatch[1]);
     }
-    
+
     // Extract primary needs
     const needsKeywords = {
       email: ['email', 'outlook', 'mail'],
@@ -319,7 +321,7 @@ export function extractUserPreferences(conversationHistory = []) {
       security: ['security', 'compliance', 'protection', 'defender'],
       cloud: ['cloud', 'storage', 'azure'],
     };
-    
+
     Object.entries(needsKeywords).forEach(([need, keywords]) => {
       if (keywords.some(keyword => text.includes(keyword))) {
         if (!preferences.primaryNeeds.includes(need)) {

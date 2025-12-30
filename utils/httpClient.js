@@ -10,9 +10,9 @@ export function makeRequest(url, options = {}) {
     const urlObj = new URL(url);
     const isHttps = urlObj.protocol === 'https:';
     const client = isHttps ? https : http;
-    
+
     const requestTimeout = options.timeout || 30000; // Use provided timeout or default to 30 seconds
-    
+
     const requestOptions = {
       hostname: urlObj.hostname,
       port: urlObj.port || (isHttps ? 443 : 80),
@@ -27,11 +27,11 @@ export function makeRequest(url, options = {}) {
 
     const req = client.request(requestOptions, (res) => {
       let data = '';
-      
+
       res.on('data', (chunk) => {
         data += chunk;
       });
-      
+
       res.on('end', () => {
         const response = {
           status: res.statusCode,
