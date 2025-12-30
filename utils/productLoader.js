@@ -207,7 +207,21 @@ export function productsToTextChunks(products) {
       const prices = [];
       if (product.pricing.monthly) prices.push(`₹${product.pricing.monthly.toLocaleString('en-IN')} / Monthly`);
       if (product.pricing.yearly) prices.push(`₹${product.pricing.yearly.toLocaleString('en-IN')} / Yearly`);
-      if (product.pricing.oneTime) prices.push(`₹${product.pricing.oneTime.toLocaleString('en-IN')} / One Time`);
+
+      const isTriennial = product.pricing.triennial ||
+        (product.pricing.oneTime &&
+          ((product.name && product.name.toLowerCase().includes("3 year")) ||
+            (product.subscriptionHint && product.subscriptionHint.toLowerCase().includes("3 year")) ||
+            (product.raw && product.raw.subscriptionHint && product.raw.subscriptionHint.toLowerCase().includes("3 year")) ||
+            (product.billingCycle && product.billingCycle.toLowerCase().includes("3 year"))));
+
+      if (product.pricing.triennial) {
+        prices.push(`₹${product.pricing.triennial.toLocaleString('en-IN')} / 3 Years`);
+      } else if (isTriennial && product.pricing.oneTime) {
+        prices.push(`₹${product.pricing.oneTime.toLocaleString('en-IN')} / 3 Years`);
+      } else if (product.pricing.oneTime) {
+        prices.push(`₹${product.pricing.oneTime.toLocaleString('en-IN')} / One Time`);
+      }
 
       if (prices.length > 0) {
         chunk += `Pricing: ${prices.join(' | ')}\n`;

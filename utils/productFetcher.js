@@ -841,7 +841,22 @@ function formatPriceDetails(product) {
       const formattedPrice = product.pricing.yearly.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       details.push(`₹${formattedPrice}/Yearly`);
     }
-    if (product.pricing.oneTime) {
+
+    // Check for explicit triennial or oneTime with a "3 Year" context
+    const isTriennial = product.pricing.triennial ||
+      (product.pricing.oneTime &&
+        ((product.name && product.name.toLowerCase().includes("3 year")) ||
+          (product.subscriptionHint && product.subscriptionHint.toLowerCase().includes("3 year")) ||
+          (product.raw && product.raw.subscriptionHint && product.raw.subscriptionHint.toLowerCase().includes("3 year")) ||
+          (product.billingCycle && product.billingCycle.toLowerCase().includes("3 year"))));
+
+    if (product.pricing.triennial) {
+      const formattedPrice = product.pricing.triennial.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      details.push(`₹${formattedPrice}/3 Years`);
+    } else if (isTriennial && product.pricing.oneTime) {
+      const formattedPrice = product.pricing.oneTime.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      details.push(`₹${formattedPrice}/3 Years`);
+    } else if (product.pricing.oneTime) {
       const formattedPrice = product.pricing.oneTime.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       details.push(`₹${formattedPrice}/One Time`);
     }

@@ -57,11 +57,11 @@ const fallbackOemMap = [
  */
 async function buildDynamicCategoryMapping() {
   const now = Date.now();
-  
+
   // Check cache first
-  if (dynamicCategoryCache.subCategoryMap && 
-      dynamicCategoryCache.lastFetch && 
-      (now - dynamicCategoryCache.lastFetch) < dynamicCategoryCache.ttl) {
+  if (dynamicCategoryCache.subCategoryMap &&
+    dynamicCategoryCache.lastFetch &&
+    (now - dynamicCategoryCache.lastFetch) < dynamicCategoryCache.ttl) {
     console.log("Using cached dynamic category mapping");
     return {
       subCategoryMap: dynamicCategoryCache.subCategoryMap,
@@ -72,7 +72,7 @@ async function buildDynamicCategoryMapping() {
   try {
     console.log("Building dynamic category mapping from API...");
     const categoryData = await fetchCategoryHierarchy();
-    
+
     const subCategoryMap = [];
     const oemMap = [];
 
@@ -80,16 +80,16 @@ async function buildDynamicCategoryMapping() {
     if (categoryData.categories && Array.isArray(categoryData.categories)) {
       categoryData.categories.forEach(category => {
         const subCategories = category.subcategories || category.subCategories || [];
-        
+
         subCategories.forEach(subCategory => {
           const subCategoryName = (subCategory.name || subCategory.title || '').toLowerCase();
           const subCategoryId = subCategory._id || subCategory.id;
-          
+
           if (subCategoryId && subCategoryName) {
             // Build keyword variations from subcategory name
             const nameWords = subCategoryName.split(/[\s-]+/).filter(w => w.length > 2);
             const names = [subCategoryName, ...nameWords];
-            
+
             // Add common variations based on subcategory name
             if (subCategoryName.includes('data') || subCategoryName.includes('database')) {
               names.push('sql', 'nosql', 'data products', 'data storage');
@@ -112,7 +112,7 @@ async function buildDynamicCategoryMapping() {
             if (subCategoryName.includes('communication')) {
               names.push('calling', 'video', 'conferencing');
             }
-            
+
             subCategoryMap.push({
               id: subCategoryId,
               names: [...new Set(names)], // Remove duplicates
@@ -121,7 +121,7 @@ async function buildDynamicCategoryMapping() {
           }
         });
       });
-      
+
       console.log(`✅ Built dynamic subcategory mapping: ${subCategoryMap.length} subcategories`);
       // Log first few subcategories for debugging
       subCategoryMap.slice(0, 5).forEach((sc, idx) => {
@@ -134,24 +134,24 @@ async function buildDynamicCategoryMapping() {
       categoryData.oems.forEach(oem => {
         const oemName = (oem.title || oem.name || '').toLowerCase();
         const oemId = oem._id || oem.id;
-        
+
         if (oemId && oemName) {
           // Build keyword variations from OEM name
           const nameWords = oemName.split(/[\s-]+/).filter(w => w.length > 2);
           const names = [oemName, ...nameWords];
-          
+
           // Add common variations
           if (oemName.includes('microsoft')) {
             names.push('office', 'azure', 'ms', 'microsoft 365', 'office 365');
           }
-          
+
           oemMap.push({
             id: oemId,
             names: [...new Set(names)] // Remove duplicates
           });
         }
       });
-      
+
       console.log(`✅ Built dynamic OEM mapping: ${oemMap.length} OEMs`);
       // Log OEMs for debugging
       oemMap.forEach((oem, idx) => {
@@ -171,7 +171,7 @@ async function buildDynamicCategoryMapping() {
   } catch (error) {
     console.error("Error building dynamic category mapping:", error.message);
     console.warn("Using fallback hardcoded category mapping");
-    
+
     // Return fallback if API fails
     return {
       subCategoryMap: fallbackSubCategoryMap,
@@ -249,3 +249,44 @@ export function inferConversationStage(conversationHistory = [], message = "", i
   return "Narrowing";
 }
 
+/**
+ * Checks if the message is related to the SkySecure domain (Software, IT, Marketplace)
+ * @param {string} message - User message
+ * @param {Object} intent - Resolved intent object
+ * @returns {boolean} - True if related to domain
+ */
+export function isDomainRelated(message, intent) {
+  // If we already matched a category or OEM, it's definitely in-domain
+  if (intent.subCategoryId || intent.oemId) return true;
+
+  const text = (message || "").toLowerCase();
+
+  // High-confidence tech/marketplace keywords
+  const techKeywords = [
+    'software', 'license', 'subscription', 'price', 'plan', 'billing',
+    'microsoft', 'google', 'aws', 'azure', 'cloud', 'security',
+    'teams', 'office', 'defender', 'sql', 'database', 'server',
+    'marketplace', 'buy', 'purchase', 'trial', 'download', 'install',
+    'it services', 'enterprise', 'saas', 'crm', 'erp',
+    'categories', 'oems', 'best selling', 'best sellers', 'featured', 'browse'
+  ];
+
+  if (techKeywords.some(k => text.includes(k))) return true;
+
+  // Very common "intro" questions that are about the bot itself
+  const botKeywords = ['what can you do', 'who are you', 'how do you work', 'help me', 'products'];
+  if (botKeywords.some(k => text.includes(k))) return true;
+
+  return false;
+}
+
+/**
+ * Checks if the message is a simple greeting
+ * @param {string} message 
+ * @returns {boolean}
+ */
+export function isGreeting(message) {
+  const text = (message || "").toLowerCase().trim();
+  const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'hola'];
+  return greetings.some(g => text === g || text.startsWith(g + ' '));
+}

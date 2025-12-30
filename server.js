@@ -7,7 +7,7 @@ import { makeRequest } from "./utils/httpClient.js";
 import { fetchAllProducts, formatProductsForKnowledgeBase } from "./utils/productFetcher.js";
 import { fetchCategoryHierarchy, formatCategoryHierarchyForKnowledgeBase } from "./utils/categoryFetcher.js";
 import { scrapeAllPages, scrapeListingProducts } from "./utils/websiteScraper.js";
-import { resolveIntent, inferConversationStage } from "./utils/intentMapper.js";
+import { resolveIntent, inferConversationStage, isDomainRelated, isGreeting } from "./utils/intentMapper.js";
 import { scrapeEntireWebsite } from "./utils/comprehensiveScraper.js";
 // Embedding service re-enabled with optimizations
 import { indexContent, indexProductChunks, getRelevantContent, needsUpdate } from "./utils/embeddingService.js";
@@ -220,6 +220,46 @@ app.post("/api/chat", async (req, res) => {
 
     // Await intent resolution early as it's needed for stage inference
     const intentInfo = await intentPromise;
+
+    // FAST TRACK: Handle greetings and off-topic questions quickly
+    const greeting = isGreeting(message);
+    const domainRelated = isDomainRelated(message, intentInfo);
+
+    if (greeting || !domainRelated) {
+      console.log(`⚡ Fast-tracking ${greeting ? 'greeting' : 'off-topic'} response`);
+
+      const fastSystemPrompt = `You are a helpful virtual assistant for SkySecure Marketplace.
+      ${greeting ? 'The user just said hello. Respond with a warm, professional greeting and briefly ask how you can help them with software or IT needs.' : 'The user asked something outside the scope of software and IT. Politely inform them that you specialize in SkySecure Marketplace products and services.'}
+      Format your response with markdown and keep it concise.`;
+
+      const fastMessages = [
+        { role: "system", content: fastSystemPrompt },
+        ...conversationHistory.slice(-3).map(msg => ({
+          role: msg.from === "bot" ? "assistant" : "user",
+          content: msg.text
+        })),
+        { role: "user", content: message }
+      ];
+
+      const apiUrl = `${AZURE_OPENAI_ENDPOINT}${AZURE_OPENAI_ENDPOINT.endsWith('/') ? '' : '/'}openai/deployments/${DEPLOYMENT_NAME}/chat/completions?api-version=${API_VERSION}`;
+
+      const response = await makeRequest(apiUrl, {
+        method: 'POST',
+        headers: { "api-key": AZURE_OPENAI_API_KEY, "Content-Type": "application/json" },
+        body: { messages: fastMessages, temperature: 0.7, max_tokens: 500 }
+      });
+
+      const responseData = await response.json();
+      const botResponse = responseData.choices[0]?.message?.content || "How can I help you today?";
+
+      return res.json({
+        success: true,
+        message: botResponse,
+        quickReplies: greeting ? [{ text: "Show Best Sellers", value: "best_selling" }, { text: "Browse Categories", value: "categories" }] : [],
+        conversationStage: "Discovery"
+      });
+    }
+
     const conversationStage = inferConversationStage(conversationHistory, message, intentInfo);
 
     // Track conversation state using new conversation manager
@@ -612,25 +652,26 @@ EXAMPLES:
 
 GENERAL INSTRUCTIONS:
 1. ALWAYS check the product data sections FIRST before saying something doesn't exist - use semantic search and category sections
-2. Use the EXACT product names, prices, and vendors from the data - DO NOT make up or assume any information - NEVER infer or assume availability
-3. Format prices as ₹{amount}/{billingCycle} (e.g., ₹66,599/Monthly). If multiple pricing options (e.g., Monthly and Yearly) are available in the data, list ALL of them.
-4. Include product descriptions when available in the data - ONLY if present in the data provided
-5. Be specific and detailed - don't give generic responses, but ONLY use information from the data provided
-6. If you see a section with products, LIST THEM - don't say they don't exist, even if the category counter shows 0
-7. If products appear across multiple pages, aggregate all results and list them
-8. Say "No products found in [Category Name]" ONLY after checking the relevant filtered product listing URL in the data provided below
-9. DO NOT rely on category counters from landing pages - always check the actual filtered product listing pages (e.g., /products?subCategoryId=*, /products?oemId=*)
-10. A category is considered empty ONLY if its filtered product listing page returns zero products in the data provided
-11. Match the website structure exactly (Categories → Subcategories → Products) as shown in the data
-12. Keep responses concise, factual, and aligned with the live marketplace data - prioritize accuracy over completeness
-13. DO NOT add external explanations, recommendations, or examples unless explicitly asked
-11. ALWAYS format responses in a visually appealing way:
+2. Use the EXACT product names, prices, and vendors from the data. NEVER assume availability.
+3. **Pricing Format**: Format prices as ₹{amount}/{billingCycle} (e.g., ₹66,599/Monthly). If multiple pricing options (e.g., Monthly, Yearly, 3 Years/Triennial) are available, list ALL of them. 
+4. **Table Cleanliness**: When using tables, DO NOT use HTML tags like '<br>' for multiple prices. Instead, use a simple space or " | " as a separator within the cell.
+5. Include product descriptions only if they are present in the provided data.
+6. Be specific and detailed - don't give generic responses, but ONLY use information from the data provided.
+7. If you see a section with products, LIST THEM - don't say they don't exist, even if the category counter shows 0.
+8. If products appear across multiple pages, aggregate all results and list them.
+9. Say "No products found in [Category Name]" ONLY after checking the relevant filtered product listing URL in the data provided below.
+10. DO NOT rely on category counters from landing pages - always check the actual filtered product listing pages (e.g., /products?subCategoryId=*, /products?oemId=*).
+11. A category is considered empty ONLY if its filtered product listing page returns zero products in the data provided.
+12. Match the website structure exactly (Categories → Subcategories → Products) as shown in the data.
+13. Keep responses concise, factual, and aligned with the live marketplace data - prioritize accuracy over completeness.
+14. DO NOT add external explanations, recommendations, or examples unless explicitly asked.
+15. ALWAYS format responses in a visually appealing way:
    - Use markdown headers (##, ###) for sections
-   - Use bullet points (•) or numbered lists for items
+   - Use numbered lists or bullet points (•) for all items and product listings
    - Use **bold** for product names, prices, and important information
-   - Use tables for comparing multiple products
+   - DO NOT use tables for product listings; display them point-wise instead
    - Add horizontal rules (---) between major sections
-   - Use emojis sparingly for visual appeal (📦, 💰, 🏷️, ✅, etc.)
+   - Use emojis strategically for visual appeal (📦, 💰, 🏷️, ✅, etc.)
    - Structure information hierarchically with clear spacing
 7. Categories are organized in a HIERARCHICAL structure in the "=== MARKETPLACE CATEGORY HIERARCHY ===" section:
    - Main Categories are numbered (e.g., "1. Software (X products)")
@@ -682,8 +723,8 @@ VISUAL FORMATTING REQUIREMENTS - MAKE ALL RESPONSES VISUALLY APPEALING:
    - Use ## for main headings with emojis (e.g., ## 🏆 Best Selling Products)
    - Use ### for sub-headings
    - Use **bold** for product names, prices, OEMs, and important info
-   - Use bullet points (•) or numbered lists
-   - Use tables for 3+ products with clean, well-aligned columns
+   - Use point-wise (numbered or bulleted) lists for ALL product listings
+   - AVOID using tables as they can be hard to read on mobile; prefer one-below-the-other lists
    - Use horizontal rules (---) to separate sections
 
 2. **Format prices** with comma separators: ₹12,345.67/Monthly (not ₹12345.67)
@@ -702,22 +743,15 @@ VISUAL FORMATTING REQUIREMENTS - MAKE ALL RESPONSES VISUALLY APPEALING:
    - 📊 for statistics/summaries
    - 🎯 for highlights/key points
 
-4. **Product Listing Format (Best Selling, Featured, Recently Added):**
-   - Start with an engaging header: ## 🏆 Best Selling Products in SkySecure Marketplace
+4. **Product Listing Format (Best Selling, Featured, Recently Added, Categories):**
+   - Start with an engaging header: ## 🏆 [Category Title] in SkySecure Marketplace
    - Add a brief, friendly intro line (1-2 sentences) that sets context
-   - For 3+ products: Use a clean, well-formatted table with these columns in this order:
-     * **#** (rank number, left-aligned)
-     * **Product Name** (bold, full name, left-aligned - this is the most important column)
-     * **Vendor** 🏢 (with emoji, center-aligned if possible)
-     * **Price** 💰 (formatted with commas, right-aligned for easy comparison)
-     * **Category** 🏷️ (with emoji, left-aligned)
-     * **Description** (truncated to 50-60 chars if too long, add "..." if truncated, left-aligned)
-   - For tables: 
-     * Make ALL column headers bold and include emojis
-     * Use proper markdown table syntax with alignment (|:---|:---:|---:|)
-     * Keep product names on separate lines if they're long (use line breaks)
-     * Ensure consistent spacing and alignment
-   - After table: Add a "### 🎯 Highlights" section with:
+   - List ALL products point-wise (numbered 1, 2, 3...) using this format for each item:
+     1. [**Product Name**](Link) | 🏢 **Vendor**: [Vendor] | 💰 **Price**: [Price/Cycle]
+        *   🏷️ **Category**: [Category]
+        *   📝 **Description**: [Brief description or features]
+   - Keep each product clearly separated with a blank line
+   - After the list: Add a "### 🎯 Quick Highlights" section with:
      * Most affordable product (with price)
      * Most popular/featured product (with brief reason)
      * Key benefits or categories covered
@@ -725,25 +759,23 @@ VISUAL FORMATTING REQUIREMENTS - MAKE ALL RESPONSES VISUALLY APPEALING:
    - Use horizontal rule (---) before highlights section for visual separation
    - End with a friendly, helpful closing line that invites further questions
 
-5. **Table Formatting Best Practices:**
-   - Keep product names in first column after #, make them bold and descriptive
-   - Align prices right (use |:---|:---:|---:| syntax) for easy comparison
-   - Keep descriptions concise (max 60-70 characters, truncate with "...")
-   - Use consistent spacing in cells - add spaces around content
-   - Add rank numbers (#) for ordered lists (best selling, top products)
-   - Make table headers stand out with bold and emojis
-   - Use proper markdown table alignment syntax for better rendering
+5. **List Formatting Best Practices:**
+   - Keep product names bold and make them links if URLs are available
+   - Ensure the Price and Vendor are easy to spot on the same line or immediate sub-points
+   - Keep descriptions concise (max 100-120 characters)
+   - Use consistent spacing - add blank lines BETWEEN items for better readability on small screens
+   - Use rank numbers (1., 2., 3.) for ordered lists like Best Selling or Top Products
 
 6. **Structure examples:**
    - Categories: Use tree structure with bullet points and emojis
    - Products (1-2): Use detailed card format with bold labels and emojis
-   - Products (3+): Use well-formatted tables with emojis in headers
-   - OEMs: Use table format with vendor emoji
+   - Products (3+): Use point-wise numbered lists as defined in section 4
+   - OEMs: Use a clean bulleted list with vendor name and emoji
 
 7. **Add spacing** - blank lines between sections for readability
 
 8. **Always include summaries/highlights** when listing many items:
-   - Add a "Highlights" or "Summary" section after product tables
+   - Add a "Highlights" or "Summary" section after product lists
    - Include key statistics (total products, price ranges, popular categories)
    - Mention standout products or features
 
@@ -759,9 +791,10 @@ VISUAL FORMATTING REQUIREMENTS - MAKE ALL RESPONSES VISUALLY APPEALING:
    Use this structure when listing products:
    - Header: ## [Emoji] [Title] in SkySecure Marketplace
    - Brief intro sentence (1-2 lines)
-   - Table with columns: # | Product Name | Vendor 🏢 | Price 💰 | Category 🏷️ | Description
-   - Table alignment: |:---|:---|:---:|---:|:---|:---|
-   - Example row: | 1 | [**Product Name**](Link) | Microsoft | ₹12,345.67/Monthly | Software | Brief description... |
+   - Numbered List (1, 2, 3...):
+     1. [**Product Name**](Link) | 🏢 **Vendor**: [Vendor] | 💰 **Price**: [Price/Cycle]
+        *   🏷️ **Category**: [Category]
+        *   📝 **Description**: [Description]
    - Horizontal rule: ---
    - Highlights section: ### 🎯 Highlights with bullet points for most affordable, most popular, key categories, and total products
    - Friendly closing line with emoji
