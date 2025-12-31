@@ -273,7 +273,8 @@ export function isDomainRelated(message, intent) {
     'teams', 'office', 'defender', 'sql', 'database', 'server',
     'marketplace', 'buy', 'purchase', 'trial', 'download', 'install',
     'it services', 'enterprise', 'saas', 'crm', 'erp',
-    'categories', 'oems', 'best selling', 'best sellers', 'featured', 'browse'
+    'categories', 'oems', 'best selling', 'best sellers', 'featured', 'browse',
+    'compare', 'comparison', 'options', 'details', 'pricing', 'features', 'show', 'see'
   ];
 
   if (techKeywords.some(k => text.includes(k))) return true;

@@ -272,45 +272,24 @@ app.post("/api/chat", async (req, res) => {
     console.log("Loading products from products_normalized.json...");
     const productsFromJSON = await productsPromise;
 
-    // Index products with embeddings for semantic search - ONLY ONCE
+    // Index products in background if not already indexed
     if (productsFromJSON.length > 0 && !isIndexed) {
-      console.log("Indexing products with embeddings for semantic search (First Run)...");
-      const productChunks = productsToTextChunks(productsFromJSON);
-
-      // Index in background or wait with timeout
-      try {
-        await Promise.race([
-          indexProductChunks(productChunks),
-          new Promise((resolve) => setTimeout(() => resolve(), 30000)) // 30s timeout
-        ]);
-        isIndexed = true;
-        console.log("✅ Semantic search indexing complete");
-      } catch (err) {
-        console.warn("Product indexing failed, continuing without semantic search:", err.message);
-      }
-    } else if (productsFromJSON.length > 0) {
-      console.log("Using cached product embeddings (already indexed)");
+      // Don't wait for indexing during the request if it's already running in background
+      console.log("Semantic search index is still warming up in background...");
     }
 
     // Get relevant content using semantic search on products (only if indexed)
     let relevantContentPromise = Promise.resolve("");
-    if (productsFromJSON.length > 0 && isIndexed) {
-      console.log("Finding relevant products using semantic search...");
-      relevantContentPromise = Promise.race([
-        getRelevantContent(message, 10), // Get top 10 relevant products
-        new Promise((resolve) => setTimeout(() => resolve(""), 2000)) // 2s timeout
-      ]).catch(err => {
+    if (isIndexed) {
+      relevantContentPromise = getRelevantContent(message, 10).catch(err => {
         console.warn("Semantic search failed:", err.message);
         return "";
       });
-    } else {
-      if (!isIndexed) console.log("Skipping semantic search - Index not ready yet");
     }
 
     // Use products loaded from JSON file
     console.log("Using products from JSON file...");
     let products = productsFromJSON || [];
-    let productFetchError = null;
 
     // Load marketplace signals and enrich products
     console.log("Loading marketplace signals...");
@@ -321,10 +300,15 @@ app.post("/api/chat", async (req, res) => {
     console.log(`Semantic search returned ${relevantContent.length} characters of relevant content`);
 
     // Enrich products with marketplace signals (set flags)
+    let featuredCount = 0;
+    let topSellingCount = 0;
+    let recentlyAddedCount = 0;
+
     if (marketplaceSignals) {
       // Set best selling flag
       if (marketplaceSignals.bestSelling && Array.isArray(marketplaceSignals.bestSelling)) {
         const bestSellingProducts = resolveProductsByIds(marketplaceSignals.bestSelling, products);
+        topSellingCount = bestSellingProducts.length;
         bestSellingProducts.forEach(product => {
           product.isTopSelling = true;
         });
@@ -334,6 +318,7 @@ app.post("/api/chat", async (req, res) => {
       // Set featured flag
       if (marketplaceSignals.featured && Array.isArray(marketplaceSignals.featured)) {
         const featuredProducts = resolveProductsByIds(marketplaceSignals.featured, products);
+        featuredCount = featuredProducts.length;
         featuredProducts.forEach(product => {
           product.isFeatured = true;
         });
@@ -346,6 +331,7 @@ app.post("/api/chat", async (req, res) => {
           typeof item === 'object' ? item.productId : item
         );
         const recentlyAddedProducts = resolveProductsByIds(recentlyAddedIds, products);
+        recentlyAddedCount = recentlyAddedProducts.length;
         recentlyAddedProducts.forEach(product => {
           product.isLatest = true;
         });
@@ -353,97 +339,21 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`📊 PRODUCTS RETRIEVED FOR KNOWLEDGE BASE`);
-    console.log(`${'='.repeat(80)}`);
-    console.log(`Total Products Retrieved: ${products.length}`);
+    console.log(`📊 PRODUCTS RETRIEVED: Total=${products.length}, Featured=${featuredCount}, TopSelling=${topSellingCount}, Latest=${recentlyAddedCount}`);
 
-    const featuredCount = products.filter(p => p.isFeatured).length;
-    const topSellingCount = products.filter(p => p.isTopSelling).length;
-    const recentlyAddedCount = products.filter(p => p.isLatest).length;
-    console.log(`Product Breakdown:`);
-    console.log(`  - Featured: ${featuredCount}`);
-    console.log(`  - Top Selling: ${topSellingCount}`);
-    console.log(`  - Recently Added: ${recentlyAddedCount}`);
-
-    // DYNAMIC SEARCH: Analyze user query for specific product searches
+    // DYNAMIC SEARCH: Identify search terms without verbose logging
     const queryLower = message.toLowerCase();
     const searchTerms = [];
-
-    // Detect SQL-related queries
-    if (queryLower.includes('sql') || queryLower.includes('database')) {
-      searchTerms.push('SQL/Database');
-      const sqlProducts = products.filter(p => {
-        const name = (p.name || '').toLowerCase();
-        const desc = (p.description || '').toLowerCase();
-        return name.includes('sql') || desc.includes('sql') || name.includes('database');
-      });
-      console.log(`\n🔍 DYNAMIC SEARCH: SQL/Database Products`);
-      console.log(`  Found ${sqlProducts.length} SQL/Database products:`);
-      sqlProducts.forEach((p, idx) => {
-        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
-      });
-    }
-
-    // Detect Email-related queries
-    if (queryLower.includes('email') || queryLower.includes('exchange') || queryLower.includes('outlook')) {
-      searchTerms.push('Email');
-      const emailProducts = products.filter(p => {
-        const name = (p.name || '').toLowerCase();
-        const desc = (p.description || '').toLowerCase();
-        return name.includes('email') || desc.includes('email') ||
-          name.includes('exchange') || name.includes('outlook');
-      });
-      console.log(`\n🔍 DYNAMIC SEARCH: Email Products`);
-      console.log(`  Found ${emailProducts.length} Email products:`);
-      emailProducts.forEach((p, idx) => {
-        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
-      });
-    }
-
-    // Detect Collaboration-related queries
-    if (queryLower.includes('collaboration') || queryLower.includes('teams') ||
-      queryLower.includes('sharepoint') || queryLower.includes('onedrive')) {
-      searchTerms.push('Collaboration');
-      const collabProducts = products.filter(p => {
-        const name = (p.name || '').toLowerCase();
-        const desc = (p.description || '').toLowerCase();
-        const subCat = (p.subCategory || '').toLowerCase();
-        return name.includes('teams') || name.includes('sharepoint') ||
-          name.includes('onedrive') || subCat.includes('collaboration');
-      });
-      console.log(`\n🔍 DYNAMIC SEARCH: Collaboration Products`);
-      console.log(`  Found ${collabProducts.length} Collaboration products:`);
-      collabProducts.forEach((p, idx) => {
-        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
-      });
-    }
+    if (queryLower.includes('sql') || queryLower.includes('database')) searchTerms.push('SQL/Database');
+    if (queryLower.includes('email') || queryLower.includes('exchange') || queryLower.includes('outlook')) searchTerms.push('Email');
+    if (queryLower.includes('collaboration') || queryLower.includes('teams') || queryLower.includes('sharepoint') || queryLower.includes('onedrive')) searchTerms.push('Collaboration');
 
     if (searchTerms.length > 0) {
-      console.log(`\n🎯 Search Terms Detected: ${searchTerms.join(', ')}`);
+      console.log(`🎯 Contextual Search Terms: ${searchTerms.join(', ')}`);
     }
 
-    // Group products by category for logging
-    const productsByCategory = {};
-    products.forEach(p => {
-      const cat = p.category || 'Uncategorized';
-      if (!productsByCategory[cat]) productsByCategory[cat] = [];
-      productsByCategory[cat].push(p);
-    });
-
-    console.log(`\n📦 Products by Category:`);
-    Object.entries(productsByCategory).sort((a, b) => b[1].length - a[1].length).forEach(([cat, catProducts]) => {
-      console.log(`  ${cat}: ${catProducts.length} products`);
-    });
-
-    console.log(`${'='.repeat(80)}\n`);
-
-    if (products.length === 0 && productFetchError) {
-      console.error(`ERROR: Failed to fetch products from API: ${productFetchError}`);
-      console.error("This may indicate:");
-      console.error("1. PRODUCT_SERVICE_BACKEND_URL is incorrect or unreachable");
-      console.error("2. Network connectivity issues");
-      console.error("3. API authentication or permission issues");
+    if (products.length === 0) {
+      console.warn("WARNING: No products loaded. Check if products_normalized.json exists and is valid.");
     }
 
     // Fetch category hierarchy and OEMs (use promise from start)
@@ -452,7 +362,7 @@ app.post("/api/chat", async (req, res) => {
     try {
       const categoryData = await Promise.race([
         categoryPromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Category API timeout")), 15000)) // 15s timeout
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Category API timeout")), 2500)) // 2.5s timeout
       ]);
 
       categoryHierarchy = formatCategoryHierarchyForKnowledgeBase(
@@ -639,35 +549,21 @@ EXAMPLES:
 
 GENERAL INSTRUCTIONS:
 1. **DATA PRIORITY**: ALWAYS check "SEMANTIC SEARCH RESULTS" and specific category sections (e.g., SQL, FEATURED) before saying something doesn't exist.
-2. **STRICT FORMATTING (NO TABLES)**: NEVER use markdown tables OR table-like layouts (e.g., "Plan | Price"). These are tokens-heavy and cause "half-answers." ALWAYS use point-wise lists.
-3. **PRODUCT LISTING FORMAT**: Use this EXACT structure for EVERY product mention:
+2. **STRICT VISUAL RULES (NO TABLES)**: 
+   - NEVER use markdown tables OR pseudo-tables (tab-separated text).
+   - NEVER use column-based layouts.
+   - ALWAYS use vertical, point-wise lists.
+   - For comparisons, use: ## [Product Name] > Bullet points for details.
+3. **MANDATORY CLICKABLE LINKS**: Every single time you mention a product name, you MUST make it a clickable markdown link using the EXACT URL from the "Link:" field in the data. Format: [**Product Name**](Direct_URL_From_Data).
+4. **PRODUCT LISTING FORMAT**:
    1. [**Product Name**](Direct_URL_From_Data) | 🏢 **Vendor**: [Vendor] | 💰 **Price**: [All Available Prices Joined by " | "]
       - 🏷️ **Category**: [Category]
       - 📝 **Description**: [Brief 1-sentence description]
-4. **COMPARISON FORMAT**: For "Compare" requests, DO NOT use columns. Use this vertical hierarchy:
-   - ## 🧪 [Product Name] 
-     - 💰 **Pricing**: [All Prices]
-     - 🎯 **Best For**: [Use Case]
-     - ✅ **Key Features**: [Feature 1], [Feature 2]
-5. **PRICING**: Format as ₹{amount}/{Cycle}. List ALL available cycles (Monthly, Yearly, 3-Year). Never omit Monthly if present.
-6. **STRICT LINK GUARDRAIL**: ONLY use URLs from the "Link:" field in the data. NEVER guess or use "skysecuremarketplace.com". All official links start with "https://shop.skysecure.ai/".
-7. **BE CONCISE**: To avoid truncation (half-answers), keep descriptions brief and focus on the data provided.
-8. **ACCURACY**: Use EXACT names and prices. Do not assume availability.
-7. Categories are organized in a HIERARCHICAL structure in the "=== MARKETPLACE CATEGORY HIERARCHY ===" section:
-   - Main Categories are numbered (e.g., "1. Software (X products)")
-   - Sub-Categories are indented and numbered under main categories (e.g., "   1.1 Cloud services (Y products)", "   1.2 Data Management (Z products)", "   1.3 Collaboration Tools", "   1.4 Enterprise Applications", "   1.5 Governance and Compliance", "   1.6 Identity and Access Management", "   1.7 Communication", etc.)
-   - Sub-Sub-Categories are further indented (if available)
-   - When users ask "what are the categories", you MUST show:
-     * The main categories (e.g., "Software")
-     * ALL sub-categories under each main category (e.g., "Cloud services", "Data Management", etc.)
-     * Product counts for each category and sub-category
-   - When users ask "what are the sub categories in software" or similar, you MUST list ALL sub-categories shown under that main category in the hierarchy
-   - If the hierarchy shows sub-categories exist (e.g., "1.1 Cloud services", "1.2 Data Management"), you MUST list them. DO NOT say "no subcategories" if they are shown in the data.
-8. OEMs (Original Equipment Manufacturers) are separate from categories and include vendors like Microsoft, Google, Adobe, Intel, AWS, etc. They are listed in the "=== ORIGINAL EQUIPMENT MANUFACTURERS (OEMs) ===" section. When users ask about categories, you should also mention OEMs are available separately.
-9. Categories are dynamically fetched from live marketplace data - use the exact category names, sub-category names, and product counts shown in the "MARKETPLACE CATEGORY HIERARCHY" section
-10. Recently added products are identified by: (a) explicit "latest" flag from API, OR (b) products created in the last 30 days based on createdAt date
-11. If the product data shows "No product information available" or empty sections, clearly state: "Unable to fetch live marketplace data at the moment. Please try again later or contact SkySecure support."
-12. BEFORE answering any question about categories, sub-categories, featured products, best selling products, or recently added products, you MUST check the data provided below. The data is LIVE and ACCURATE. Use it!
+5. **PRICING**: Format as ₹{amount}/{Cycle}. List ALL available cycles (Monthly, Yearly, 3-Year).
+6. **STRICT LINK GUARDRAIL**: ONLY use URLs from the "Link:" field. NEVER guess or use "skysecuremarketplace.com". All official links start with "https://shop.skysecure.ai/".
+7. **CATEGORIES**: Organized in the "MARKETPLACE CATEGORY HIERARCHY" section. Use the exact hierarchy (1., 1.1, 1.2, etc.) and product counts provided.
+8. **ACCURACY**: Use EXACT names and prices from the provided JSON data.
+9. **CONCISE RESPONSES**: To avoid truncation, keep descriptions to 1 sentence. If more than 10 products are found, list the top 10 and offer to show more.
 
 CRITICAL: All data is fetched LIVE from the SkySecure Marketplace API. There are NO hard-coded responses. If data is missing, it means the API returned no data, and you must clearly communicate this to the user.
 
@@ -680,7 +576,8 @@ ABSOLUTE GUARDRAILS:
 3. If intent is clear, recommend 1–2 products with reasoning and always include a direct Link for each product when available.
 4. Treat products parsed from listing pages as authoritative first-class data for availability.
 5. **STRICT LINK GUARDRAIL**: ONLY use the direct links provided in the "Link:" field of the product data. NEVER guess, assume, or hallucinate a URL. NEVER use "skysecuremarketplace.com" as a domain unless explicitly seen in the "Link:" field. All official links start with "${baseUrl}".
-6. **MANDATORY CLICKABLE NAMES**: Every time you mention a product name, you MUST make it a clickable markdown link using the exact URL from the "Link:" field. E.g., [**Product Name**](Exact_Link_From_Data).
+6. **NO TRUNCATION**: You must output the FULL, EXACT URL found in the "Link:" field. URLs may be long; do not shorten or truncate them.
+7. **MANDATORY CLICKABLE NAMES**: Every time you mention a product name, you MUST make it a clickable markdown link using the exact URL from the "Link:" field. E.g., [**Product Name**](Exact_Link_From_Data).
 
 CONVERSATION STAGES:
 Discovery → Narrowing → Recommendation → Conversion.
@@ -699,12 +596,7 @@ MANDATORY CHECKLIST before answering:
   If ANY of these sections show products, list ALL of them with name, vendor, price, and billing cycle
 - Question about email or collaboration products? → Check "=== EMAIL & COLLABORATION PRODUCTS ===" section FIRST, then "=== PRODUCTS FROM LISTING PAGES ==="
 
-9. **CONCISE RESPONSE RULES (To Avoid Half-Answers)**:
-   - NEVER use tables or pseudo-tables.
-   - For comparisons, use the vertical hierarchy: ## [Product] > Bullet points for details.
-   - Keep descriptions to 1 sentence.
-   - Use the [**Name**](Direct_URL_From_Data) format for every product.
-   - If more than 10 products are found, list the top 10 and ask if they want to see more.
+10. **CONTEXTUAL CONTINUITY**: If a user clicks a button like "Compare Options", "Show Pricing", or "See Features" after you've provided an overview or list, they are referring to those specific products. You MUST use the conversation history to perform the requested action (Compare, Pricing, or Features) for the items you JUST mentioned. DO NOT ask for clarification; use the products from the previous bot message.
 
 The data is comprehensive and accurate - USE IT!`;
 
@@ -741,23 +633,22 @@ The data is comprehensive and accurate - USE IT!`;
     console.log(`System prompt size: ${systemPrompt.length} characters`);
     console.log(`Total messages: ${messages.length}`);
 
-    const response = await Promise.race([
-      makeRequest(apiUrl, {
-        method: 'POST',
-        headers: {
-          "api-key": AZURE_OPENAI_API_KEY,
-          "Content-Type": "application/json",
-        },
-        body: {
-          messages: messages,
-          temperature: 0.7,
-          max_tokens: 4096,
-        },
-        timeout: 120000, // Increased to 120 seconds (2 minutes)
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("OpenAI API timeout")), 120000)) // 120s timeout
-    ]).catch(err => {
-      console.error("OpenAI API call failed:", err.message);
+    // Call Azure OpenAI REST API with automatic retries for stability
+    console.log("Calling Azure OpenAI API (with auto-retries)...");
+    const response = await makeRequest(apiUrl, {
+      method: 'POST',
+      headers: {
+        "api-key": AZURE_OPENAI_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: {
+        messages: messages,
+        temperature: 0.7,
+        max_tokens: 4096,
+      },
+      timeout: 120000, // 2-minute timeout per attempt
+    }, 3).catch(err => {
+      console.error("OpenAI API call final failure:", err.message);
       throw err;
     });
 
@@ -796,9 +687,28 @@ The data is comprehensive and accurate - USE IT!`;
   }
 });
 
-// Start server - listen on all interfaces for dev tunnel compatibility
+// STARTUP: Warm up the server by pre-loading and indexing data
+async function initializeData() {
+  console.log("🚀 Server Warm-up: Initializing product data and semantic index...");
+  try {
+    const products = await loadProductsFromJSON();
+    if (products.length > 0) {
+      console.log(`📦 Loaded ${products.length} products for warm-up`);
+      const productChunks = productsToTextChunks(products);
+      console.log("🧠 Indexing products for semantic search...");
+      await indexProductChunks(productChunks);
+      isIndexed = true;
+      console.log("✅ Server Ready: Semantic index and product data pre-loaded");
+    }
+  } catch (error) {
+    console.error("❌ Warm-up Failed:", error.message);
+  }
+}
+
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Chatbot backend server running on port ${PORT}`);
+  console.log(`\n🤖 SkySecure Chatbot Backend running on http://localhost:${PORT}`);
+  initializeData(); // Run warm-up in background
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`Chat endpoint: http://localhost:${PORT}/api/chat`);
   console.log(`Server is accessible from dev tunnel`);

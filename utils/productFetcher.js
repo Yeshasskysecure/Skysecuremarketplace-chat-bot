@@ -54,17 +54,6 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
         console.log(`📦 PRODUCTS FETCHED FROM API`);
         console.log(`${'='.repeat(80)}`);
         console.log(`Total Products Fetched: ${allProducts.length}`);
-        console.log(`\n📋 ALL PRODUCT NAMES (${allProducts.length} products):`);
-        console.log(`${'-'.repeat(80)}`);
-        allProducts.forEach((product, index) => {
-          const productName = product.name || 'Unnamed Product';
-          const vendor = product.oemDetails?.[0]?.title || 'Unknown Vendor';
-          const category = product.categoryDetails?.[0]?.name || 'Uncategorized';
-          const subCategory = product.subCategoryDetails?.[0]?.name || 'General';
-          console.log(`${String(index + 1).padStart(4, ' ')}. ${productName}`);
-          console.log(`        Vendor: ${vendor} | Category: ${category} | SubCategory: ${subCategory}`);
-        });
-        console.log(`${'='.repeat(80)}\n`);
       }
     } else {
       console.warn(`⚠️  API Response not OK: ${allProductsResponse.status}`);
@@ -453,46 +442,11 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       byVendor[vendor].push(product);
     });
 
-    console.log(`\n📊 PRODUCTS BY CATEGORY:`);
-    console.log(`${'-'.repeat(80)}`);
-    Object.entries(byCategory).sort((a, b) => b[1].length - a[1].length).forEach(([category, categoryProducts]) => {
-      console.log(`  ${category}: ${categoryProducts.length} products`);
-    });
+    console.log(`  - Grouped by Category: ${Object.keys(byCategory).length}`);
+    console.log(`  - Grouped by Sub-Category: ${Object.keys(bySubCategory).length}`);
+    console.log(`  - Grouped by Vendor: ${Object.keys(byVendor).length}`);
 
-    console.log(`\n📊 PRODUCTS BY SUB-CATEGORY:`);
-    console.log(`${'-'.repeat(80)}`);
-    Object.entries(bySubCategory).sort((a, b) => b[1].length - a[1].length).forEach(([subCategory, subCategoryProducts]) => {
-      if (subCategory && subCategory !== "General") {
-        console.log(`  ${subCategory}: ${subCategoryProducts.length} products`);
-        // Log product names in this subcategory
-        subCategoryProducts.slice(0, 10).forEach((p, idx) => {
-          console.log(`    ${idx + 1}. ${p.name} (${p.vendor})`);
-        });
-        if (subCategoryProducts.length > 10) {
-          console.log(`    ... and ${subCategoryProducts.length - 10} more`);
-        }
-      }
-    });
-
-    console.log(`\n📊 PRODUCTS BY VENDOR:`);
-    console.log(`${'-'.repeat(80)}`);
-    Object.entries(byVendor).sort((a, b) => b[1].length - a[1].length).forEach(([vendor, vendorProducts]) => {
-      console.log(`  ${vendor}: ${vendorProducts.length} products`);
-    });
-
-    // DYNAMIC LOGGING: Log all product names with details
-    console.log(`\n📋 ALL PARSED PRODUCT NAMES (${products.length} products):`);
-    console.log(`${'-'.repeat(80)}`);
-    products.forEach((product, index) => {
-      const flags = [];
-      if (product.isFeatured) flags.push('⭐ Featured');
-      if (product.isTopSelling) flags.push('🏆 Top Selling');
-      if (product.isLatest) flags.push('🆕 Recent');
-      const flagStr = flags.length > 0 ? ` [${flags.join(', ')}]` : '';
-      console.log(`${String(index + 1).padStart(4, ' ')}. ${product.name}${flagStr}`);
-      console.log(`        ID: ${product.id} | Vendor: ${product.vendor} | Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''} | Price: ₹${product.price}/${product.billingCycle}`);
-    });
-    console.log(`${'='.repeat(80)}\n`);
+    console.log(`✅ Successfully parsed ${products.length} products`);
 
     console.log(`After mapping: ${products.filter(p => p.isTopSelling).length} products marked as top selling`);
 
@@ -777,25 +731,7 @@ export async function fetchAllProducts(websiteContent = "", intentInfo = null) {
       });
     }
 
-    // Group final products by category
-    const finalByCategory = {};
-    products.forEach(p => {
-      const cat = p.category || 'Uncategorized';
-      if (!finalByCategory[cat]) finalByCategory[cat] = [];
-      finalByCategory[cat].push(p);
-    });
-
-    console.log(`\n📦 FINAL PRODUCTS BY CATEGORY:`);
-    console.log(`${'-'.repeat(80)}`);
-    Object.entries(finalByCategory).sort((a, b) => b[1].length - a[1].length).forEach(([category, categoryProducts]) => {
-      console.log(`  ${category}: ${categoryProducts.length} products`);
-      categoryProducts.slice(0, 5).forEach((p, idx) => {
-        console.log(`    ${idx + 1}. ${p.name}`);
-      });
-      if (categoryProducts.length > 5) {
-        console.log(`    ... and ${categoryProducts.length - 5} more`);
-      }
-    });
+    console.log(`  - Grouped by Final Category: ${Object.keys(finalByCategory).length}`);
 
     console.log(`${'='.repeat(80)}\n`);
 
@@ -932,10 +868,14 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `${subCat.toUpperCase()} PRODUCTS (${subCatProducts.length} products):\n`;
       subCatProducts
         .sort((a, b) => (b.price || 0) - (a.price || 0)) // Sort by price descending
+        .slice(0, 5)
         .forEach((product) => {
           knowledgeBase += `  - ${product.name} (${product.vendor}): ${formatPriceDetails(product)}\n`;
           if (product.url) knowledgeBase += `    Link: ${product.url}\n`;
         });
+      if (subCatProducts.length > 5) {
+        knowledgeBase += `    ... and ${subCatProducts.length - 5} more products in ${subCat}\n`;
+      }
       knowledgeBase += `\n`;
     }
   });
