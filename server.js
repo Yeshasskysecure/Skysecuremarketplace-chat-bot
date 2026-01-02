@@ -88,6 +88,24 @@ app.options("/api/chat", (req, res) => {
 function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignals, categoryRankings, oemRankings) {
   let augmentedSections = "";
 
+  // aa) POWER BI SPECIFIC SEARCH (CRITICAL)
+  if (queryLower.includes('power bi')) {
+    const powerBiProducts = products.filter(p => (p.name || '').toLowerCase().includes('power bi'));
+    if (powerBiProducts.length > 0) {
+      augmentedSections += `\n=== ACCURATE POWER BI PRODUCTS (${powerBiProducts.length} products) ===\n`;
+      augmentedSections += `MANDATORY: These are the ONLY Power BI products. Do NOT list Power Automate products for this query.\n\n`;
+      powerBiProducts.forEach((product, index) => {
+        augmentedSections += `${index + 1}. **${product.name}**\n`;
+        augmentedSections += `   Vendor: ${product.vendor}\n`;
+        augmentedSections += `   Price: ${product.price ? `₹${product.price.toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}` : "Contact Sales"}\n`;
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+        if (link) augmentedSections += `   Link: ${link}\n`;
+        augmentedSections += `\n`;
+      });
+      augmentedSections += `=== END ACCURATE POWER BI PRODUCTS ===\n\n`;
+    }
+  }
+
   // a) BEST SELLING PRODUCTS
   if (queryLower.includes('best selling') || queryLower.includes('top selling') || queryLower.includes('popular products')) {
     if (marketplaceSignals?.bestSelling && Array.isArray(marketplaceSignals.bestSelling)) {
@@ -272,24 +290,45 @@ app.post("/api/chat", async (req, res) => {
     console.log("Loading products from products_normalized.json...");
     const productsFromJSON = await productsPromise;
 
-    // Index products in background if not already indexed
+    // Index products with embeddings for semantic search - ONLY ONCE
     if (productsFromJSON.length > 0 && !isIndexed) {
-      // Don't wait for indexing during the request if it's already running in background
-      console.log("Semantic search index is still warming up in background...");
+      console.log("Indexing products with embeddings for semantic search (First Run)...");
+      const productChunks = productsToTextChunks(productsFromJSON);
+
+      // Index in background or wait with timeout
+      try {
+        await Promise.race([
+          indexProductChunks(productChunks),
+          new Promise((resolve) => setTimeout(() => resolve(), 30000)) // 30s timeout
+        ]);
+        isIndexed = true;
+        console.log("✅ Semantic search indexing complete");
+      } catch (err) {
+        console.warn("Product indexing failed, continuing without semantic search:", err.message);
+      }
+    } else if (productsFromJSON.length > 0) {
+      console.log("Using cached product embeddings (already indexed)");
     }
 
     // Get relevant content using semantic search on products (only if indexed)
     let relevantContentPromise = Promise.resolve("");
-    if (isIndexed) {
-      relevantContentPromise = getRelevantContent(message, 10).catch(err => {
+    if (productsFromJSON.length > 0 && isIndexed) {
+      console.log("Finding relevant products using semantic search...");
+      relevantContentPromise = Promise.race([
+        getRelevantContent(message, 15), // Increased from 10 to 15 relevant products
+        new Promise((resolve) => setTimeout(() => resolve(""), 5000)) // Increased timeout to 5s
+      ]).catch(err => {
         console.warn("Semantic search failed:", err.message);
         return "";
       });
+    } else {
+      if (!isIndexed) console.log("Skipping semantic search - Index not ready yet");
     }
 
     // Use products loaded from JSON file
     console.log("Using products from JSON file...");
     let products = productsFromJSON || [];
+    let productFetchError = null;
 
     // Load marketplace signals and enrich products
     console.log("Loading marketplace signals...");
@@ -300,15 +339,10 @@ app.post("/api/chat", async (req, res) => {
     console.log(`Semantic search returned ${relevantContent.length} characters of relevant content`);
 
     // Enrich products with marketplace signals (set flags)
-    let featuredCount = 0;
-    let topSellingCount = 0;
-    let recentlyAddedCount = 0;
-
     if (marketplaceSignals) {
       // Set best selling flag
       if (marketplaceSignals.bestSelling && Array.isArray(marketplaceSignals.bestSelling)) {
         const bestSellingProducts = resolveProductsByIds(marketplaceSignals.bestSelling, products);
-        topSellingCount = bestSellingProducts.length;
         bestSellingProducts.forEach(product => {
           product.isTopSelling = true;
         });
@@ -318,7 +352,6 @@ app.post("/api/chat", async (req, res) => {
       // Set featured flag
       if (marketplaceSignals.featured && Array.isArray(marketplaceSignals.featured)) {
         const featuredProducts = resolveProductsByIds(marketplaceSignals.featured, products);
-        featuredCount = featuredProducts.length;
         featuredProducts.forEach(product => {
           product.isFeatured = true;
         });
@@ -331,7 +364,6 @@ app.post("/api/chat", async (req, res) => {
           typeof item === 'object' ? item.productId : item
         );
         const recentlyAddedProducts = resolveProductsByIds(recentlyAddedIds, products);
-        recentlyAddedCount = recentlyAddedProducts.length;
         recentlyAddedProducts.forEach(product => {
           product.isLatest = true;
         });
@@ -339,21 +371,114 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
-    console.log(`📊 PRODUCTS RETRIEVED: Total=${products.length}, Featured=${featuredCount}, TopSelling=${topSellingCount}, Latest=${recentlyAddedCount}`);
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`📊 PRODUCTS RETRIEVED FOR KNOWLEDGE BASE`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`Total Products Retrieved: ${products.length}`);
 
-    // DYNAMIC SEARCH: Identify search terms without verbose logging
+    const featuredCount = products.filter(p => p.isFeatured).length;
+    const topSellingCount = products.filter(p => p.isTopSelling).length;
+    const recentlyAddedCount = products.filter(p => p.isLatest).length;
+    console.log(`Product Breakdown:`);
+    console.log(`  - Featured: ${featuredCount}`);
+    console.log(`  - Top Selling: ${topSellingCount}`);
+    console.log(`  - Recently Added: ${recentlyAddedCount}`);
+
+    // DYNAMIC SEARCH: Analyze user query for specific product searches
     const queryLower = message.toLowerCase();
     const searchTerms = [];
-    if (queryLower.includes('sql') || queryLower.includes('database')) searchTerms.push('SQL/Database');
-    if (queryLower.includes('email') || queryLower.includes('exchange') || queryLower.includes('outlook')) searchTerms.push('Email');
-    if (queryLower.includes('collaboration') || queryLower.includes('teams') || queryLower.includes('sharepoint') || queryLower.includes('onedrive')) searchTerms.push('Collaboration');
 
-    if (searchTerms.length > 0) {
-      console.log(`🎯 Contextual Search Terms: ${searchTerms.join(', ')}`);
+    // Detect SQL-related queries
+    if (queryLower.includes('sql') || queryLower.includes('database')) {
+      searchTerms.push('SQL/Database');
+      const sqlProducts = products.filter(p => {
+        const name = (p.name || '').toLowerCase();
+        const desc = (p.description || '').toLowerCase();
+        return name.includes('sql') || desc.includes('sql') || name.includes('database');
+      });
+      console.log(`\n🔍 DYNAMIC SEARCH: SQL/Database Products`);
+      console.log(`  Found ${sqlProducts.length} SQL/Database products:`);
+      sqlProducts.forEach((p, idx) => {
+        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
+      });
     }
 
-    if (products.length === 0) {
-      console.warn("WARNING: No products loaded. Check if products_normalized.json exists and is valid.");
+    // Detect Email-related queries
+    if (queryLower.includes('email') || queryLower.includes('exchange') || queryLower.includes('outlook')) {
+      searchTerms.push('Email');
+      const emailProducts = products.filter(p => {
+        const name = (p.name || '').toLowerCase();
+        const desc = (p.description || '').toLowerCase();
+        return name.includes('email') || desc.includes('email') ||
+          name.includes('exchange') || name.includes('outlook');
+      });
+      console.log(`\n🔍 DYNAMIC SEARCH: Email Products`);
+      console.log(`  Found ${emailProducts.length} Email products:`);
+      emailProducts.forEach((p, idx) => {
+        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
+      });
+    }
+
+    // Detect Power BI-related queries
+    if (queryLower.includes('power bi')) {
+      searchTerms.push('Power BI');
+      const powerBiProducts = products.filter(p => {
+        const name = (p.name || '').toLowerCase();
+        const desc = (p.description || '').toLowerCase();
+        return name.includes('power bi');
+      });
+      console.log(`\n🔍 DYNAMIC SEARCH: Power BI Products`);
+      console.log(`  Found ${powerBiProducts.length} Power BI products:`);
+      powerBiProducts.forEach((p, idx) => {
+        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
+      });
+    }
+
+    // Detect Power Automate-related queries
+    if (queryLower.includes('power automate')) {
+      searchTerms.push('Power Automate');
+      const powerAutomateProducts = products.filter(p => {
+        const name = (p.name || '').toLowerCase();
+        const desc = (p.description || '').toLowerCase();
+        return name.includes('power automate');
+      });
+      console.log(`\n🔍 DYNAMIC SEARCH: Power Automate Products`);
+      console.log(`  Found ${powerAutomateProducts.length} Power Automate products:`);
+      powerAutomateProducts.forEach((p, idx) => {
+        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
+      });
+    }
+
+    if (searchTerms.length > 0) {
+      console.log(`\n🎯 Search Terms Detected: ${searchTerms.join(', ')}`);
+    }
+
+    // EXPLICIT LOGGING: If both are found, or if one is found, cross-verify
+    if (queryLower.includes('power bi') && !queryLower.includes('power automate')) {
+      console.log("⚠️  ALERT: User asked for Power BI. Validating that Power Automate products are NOT being prioritized.");
+    }
+
+    // Group products by category for logging
+    const productsByCategory = {};
+    products.forEach(p => {
+      const cat = p.category || 'Uncategorized';
+      if (!productsByCategory[cat]) productsByCategory[cat] = [];
+      productsByCategory[cat].push(p);
+    });
+
+    console.log(`\n📦 Products by Category:`);
+    Object.entries(productsByCategory).sort((a, b) => b[1].length - a[1].length).forEach(([cat, catProducts]) => {
+      console.log(`  ${cat}: ${catProducts.length} products`);
+    });
+
+    console.log(`${'='.repeat(80)}\n`);
+
+    if (products.length === 0 && productFetchError) {
+      console.error(`ERROR: Failed to fetch products from API: ${productFetchError}`);
+      console.error("This may indicate:");
+      console.error("1. PRODUCT_SERVICE_BACKEND_URL is incorrect or unreachable");
+      console.error("2. Network connectivity issues");
+      console.error("3. API authentication or permission issues");
     }
 
     // Fetch category hierarchy and OEMs (use promise from start)
@@ -576,8 +701,7 @@ ABSOLUTE GUARDRAILS:
 3. If intent is clear, recommend 1–2 products with reasoning and always include a direct Link for each product when available.
 4. Treat products parsed from listing pages as authoritative first-class data for availability.
 5. **STRICT LINK GUARDRAIL**: ONLY use the direct links provided in the "Link:" field of the product data. NEVER guess, assume, or hallucinate a URL. NEVER use "skysecuremarketplace.com" as a domain unless explicitly seen in the "Link:" field. All official links start with "${baseUrl}".
-6. **NO TRUNCATION**: You must output the FULL, EXACT URL found in the "Link:" field. URLs may be long; do not shorten or truncate them.
-7. **MANDATORY CLICKABLE NAMES**: Every time you mention a product name, you MUST make it a clickable markdown link using the exact URL from the "Link:" field. E.g., [**Product Name**](Exact_Link_From_Data).
+6. **MANDATORY CLICKABLE NAMES**: Every time you mention a product name, you MUST make it a clickable markdown link using the exact URL from the "Link:" field. E.g., [**Product Name**](Exact_Link_From_Data).
 
 CONVERSATION STAGES:
 Discovery → Narrowing → Recommendation → Conversion.
@@ -592,13 +716,35 @@ MANDATORY CHECKLIST before answering:
 - Question about SQL products? → Check in this order:
   1. "=== SEMANTIC SEARCH RESULTS ===" section FIRST (most relevant products)
   2. "=== SQL PRODUCTS ===" section (from JSON file)
-  3. "=== DATA MANAGEMENT PRODUCTS ===" section
-  If ANY of these sections show products, list ALL of them with name, vendor, price, and billing cycle
-- Question about email or collaboration products? → Check "=== EMAIL & COLLABORATION PRODUCTS ===" section FIRST, then "=== PRODUCTS FROM LISTING PAGES ==="
+- Question about Power BI products? → Check in this order:
+  1. "=== SEMANTIC SEARCH RESULTS ===" section FIRST (most relevant products)
+  2. "=== POWER BI PRODUCTS ===" section (from JSON file)
+  ⚠️ WARNING: DO NOT list "Power Automate" products when the user asks for "Power BI". Only list products that specifically contain "Power BI" in their name.
+- Question about Email or Collaboration products? → Check in this order:
+  1. "=== SEMANTIC SEARCH RESULTS ===" section FIRST
+  2. "=== EMAIL & COLLABORATION PRODUCTS ===" section (from JSON file)
+- Question about Data Management products? → Check "=== DATA MANAGEMENT PRODUCTS ===" section
 
 10. **CONTEXTUAL CONTINUITY**: If a user clicks a button like "Compare Options", "Show Pricing", or "See Features" after you've provided an overview or list, they are referring to those specific products. You MUST use the conversation history to perform the requested action (Compare, Pricing, or Features) for the items you JUST mentioned. DO NOT ask for clarification; use the products from the previous bot message.
 
-The data is comprehensive and accurate - USE IT!`;
+The data is comprehensive and accurate - USE IT!
+
+11. **URL INTEGRITY (CRITICAL)**: 
+    - NEVER shorten, truncate, or "fix" URLs.
+    - Product IDs at the end of URLs (e.g., "...--6895f3b1ef1ca6239ac8b94b") must be 24 characters long.
+    - COPY THE EXACT URL from the "Link:" field, character-for-character.
+    - If a URL looks long, IT IS CORRECT. Do not cut it off.
+    - Truncating a URL breaks the link and is a critical failure.
+    - Validate that the URL ends with the full 24-character hex ID if present in the source.
+    - Example of CORRECT URL: https://shop.skysecure.ai/...--6895f3c3ef1ca6239ac8d0c5
+    - Example of BROKEN URL: https://shop.skysecure.ai/...--6895f3c3ef1ca (MISSING LAST 12 CHARS)
+    - YOU MUST OUTPUT THE FULL 24-CHAR ID. DO NOT STOP HALFWAY.
+
+12. **SELF-CORRECTION PHASE**: 
+    Before outputting any link, perform this mental check:
+    - "Does this URL end with a 12-character string like '6895f3c3ef1ca'?" -> STOP! IT IS BROKEN.
+    - "Does it end with a 24-character string like '6895f3c3ef1ca6239ac8d0c5'?" -> GOOD.
+    - You MUST use the full, long ID.`;
 
     // Build conversation messages
     const messages = [
@@ -655,13 +801,139 @@ The data is comprehensive and accurate - USE IT!`;
     const responseData = await response.json();
     const botResponse = responseData.choices[0]?.message?.content || "I apologize, but I couldn't generate a response. Please try again.";
 
+    // Log diagnostic info for response truncation
+    if (responseData.choices && responseData.choices.length > 0) {
+      const choice = responseData.choices[0];
+      console.log(`OpenAI Finish Reason: ${choice.finish_reason}`);
+      if (choice.finish_reason !== 'stop') {
+        console.warn(`⚠️  Response incomplete. Finish reason: ${choice.finish_reason}`);
+      }
+    }
+
+    if (responseData.usage) {
+      console.log(`Token Usage: Prompt=${responseData.usage.prompt_tokens}, Completion=${responseData.usage.completion_tokens}, Total=${responseData.usage.total_tokens}`);
+    }
+
     console.log("Successfully generated response");
+
+    // --- DETERMINISTIC LINK FIXER ---
+    // This safety net catches and repairs truncated URLs using the valid product data
+    let fixedResponse = botResponse;
+    const productsForFixer = productsFromJSON || [];
+
+    // Create lookup maps for fast repair
+    const validIdMap = new Map();   // Full ID -> Full URL
+    const suffixMap = new Map();    // Last 12 chars -> Full URL
+    const slugMap = new Map();      // Full Slug -> Full URL
+    const simpleSlugMap = new Map(); // Simple Slug -> Full URL
+
+    productsForFixer.forEach(p => {
+      if (p.id && p.url) {
+        validIdMap.set(p.id, p.url);
+        if (p.id.length === 24) {
+          const suffix = p.id.substring(12);
+          suffixMap.set(suffix, p.url);
+        }
+
+        // Extract full slug (everything between /products/ and the last --)
+        const match = p.url.match(/\/products\/(.*)--[a-f0-9]{24}/);
+        if (match && match[1]) {
+          const fullSlug = match[1];
+          slugMap.set(fullSlug.toLowerCase(), p.url);
+
+          // Simple Slug (last segment)
+          const parts = fullSlug.split('--');
+          const simpleSlug = parts[parts.length - 1].toLowerCase();
+          simpleSlugMap.set(simpleSlug, p.url);
+        }
+      }
+    });
+
+    // Regex: Splits the URL into [Slug] and [ID] using the last occurrence of '--'
+    const linkRegex = /https:\/\/shop\.skysecure\.ai\/products\/([^\s"')]*)--([a-f0-9]+)/gi;
+
+    fixedResponse = fixedResponse.replace(linkRegex, (fullMatch, slugCandidate, idCandidate) => {
+      const slug = slugCandidate ? slugCandidate.toLowerCase() : '';
+      const id = idCandidate.toLowerCase();
+
+      // 1. If ID is perfect and valid, keep it.
+      if (id.length === 24 && validIdMap.has(id)) {
+        return fullMatch;
+      }
+
+      console.log(`🔍 Link Fixer started for: ${fullMatch}`);
+      let repairedUrl = null;
+
+      // 2. Exact Full Slug Match
+      if (slugMap.has(slug)) {
+        repairedUrl = slugMap.get(slug);
+        console.log(`   - Repaired via Full Slug: ${slug}`);
+      }
+
+      // 3. Simple Slug / Alias / Fuzzy Segment Match
+      if (!repairedUrl) {
+        const slugParts = slug.split('--');
+        const lastSegment = slugParts[slugParts.length - 1];
+
+        const aliasMap = {
+          'power-bi-premium': 'power-bi-premium-per-user',
+          'power-bi-premium-add-on': 'power-bi-premium-per-user-add-on',
+          'azure-sql-edge': 'azure-sql-edge-1-year'
+        };
+
+        const target = aliasMap[lastSegment] || lastSegment;
+
+        if (simpleSlugMap.has(target)) {
+          repairedUrl = simpleSlugMap.get(target);
+          console.log(`   - Repaired via Segment/Alias: ${lastSegment} -> ${target}`);
+        } else {
+          // Final Fuzzy Fallback for Segments
+          for (const [validSimple, url] of simpleSlugMap.entries()) {
+            if (validSimple.startsWith(lastSegment) || lastSegment.startsWith(validSimple)) {
+              repairedUrl = url;
+              console.log(`   - Repaired via Fuzzy Segment: ${lastSegment} -> ${validSimple}`);
+              break;
+            }
+          }
+        }
+      }
+
+      // 4. Suffix repair (ID-based)
+      if (!repairedUrl && id.length >= 10) {
+        const idSuffix = id.length > 12 ? id.substring(id.length - 12) : id;
+        if (suffixMap.has(idSuffix)) {
+          repairedUrl = suffixMap.get(idSuffix);
+          console.log(`   - Repaired via ID Suffix: ${idSuffix}`);
+        }
+      }
+
+      // 5. HARD-CODED POWER BI FALLBACK (Safety Net)
+      if (!repairedUrl) {
+        if (slug.includes('power-bi-premium-per-user') || slug.includes('power-bi-premium')) {
+          repairedUrl = simpleSlugMap.get('power-bi-premium-per-user');
+          console.log("   - Repaired via Hard-Coded Power BI Fallback");
+        } else if (slug.includes('azure-sql-edge')) {
+          repairedUrl = simpleSlugMap.get('azure-sql-edge-1-year');
+          console.log("   - Repaired via Hard-Coded Azure Fallback");
+        }
+      }
+
+      if (repairedUrl) {
+        return repairedUrl;
+      }
+
+      console.log("   - NO REPAIR FOUND");
+      return fullMatch;
+    });
+
+    // Update the response with the fixed version
+    const finalResponse = fixedResponse;
 
     // Ensure CORS headers are set in response
     res.header('Access-Control-Allow-Origin', '*');
     res.json({
       success: true,
-      message: botResponse,
+      message: finalResponse,
       quickReplies: quickReplies, // Include quick-reply suggestions
       conversationStage: conversationState.stage, // Include stage for debugging
     });
@@ -687,29 +959,21 @@ The data is comprehensive and accurate - USE IT!`;
   }
 });
 
-// STARTUP: Warm up the server by pre-loading and indexing data
-async function initializeData() {
-  console.log("🚀 Server Warm-up: Initializing product data and semantic index...");
-  try {
-    const products = await loadProductsFromJSON();
-    if (products.length > 0) {
-      console.log(`📦 Loaded ${products.length} products for warm-up`);
-      const productChunks = productsToTextChunks(products);
-      console.log("🧠 Indexing products for semantic search...");
-      await indexProductChunks(productChunks);
-      isIndexed = true;
-      console.log("✅ Server Ready: Semantic index and product data pre-loaded");
-    }
-  } catch (error) {
-    console.error("❌ Warm-up Failed:", error.message);
-  }
-}
-
-// Start server
+// Start server - listen on all interfaces for dev tunnel compatibility
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🤖 SkySecure Chatbot Backend running on http://localhost:${PORT}`);
-  initializeData(); // Run warm-up in background
+  console.log(`Chatbot backend server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`Chat endpoint: http://localhost:${PORT}/api/chat`);
   console.log(`Server is accessible from dev tunnel`);
+
+  // Silent background warm-up to improve responsiveness
+  (async () => {
+    try {
+      console.log("🔄 Background Warm-up: Pre-fetching categories...");
+      await fetchCategoryHierarchy();
+      console.log("✅ Category cache ready");
+    } catch (e) {
+      console.error("Warm-up warning:", e.message);
+    }
+  })();
 });

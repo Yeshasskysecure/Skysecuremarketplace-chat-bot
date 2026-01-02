@@ -897,12 +897,22 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       category.includes(keyword)
     );
 
+    // Exclude Power BI from SQL products to avoid confusion
+    const isPowerBi = name.includes('power bi');
+    if (isPowerBi) return false;
+
     // Also check if product is in Data Management subcategory
     const isDataManagement = subCat.includes('data management') ||
       subCat.includes('data-management') ||
       category.includes('data');
 
     return hasSqlKeyword || isDataManagement;
+  });
+
+  const powerBiProducts = products.filter(p => {
+    const name = (p.name || '').toLowerCase();
+    const desc = (p.description || '').toLowerCase();
+    return name.includes('power bi');
   });
 
   // Log SQL products found for debugging
@@ -925,7 +935,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (sqlProducts.length > 0) {
     knowledgeBase += `\n=== SQL PRODUCTS (${sqlProducts.length} products) ===\n`;
     knowledgeBase += `These are ALL SQL and database-related products in SkySecure Marketplace. When a user asks about SQL products, you MUST list ALL of these products with their full details:\n\n`;
-    sqlProducts.slice(0, 20).forEach((product, index) => {
+    sqlProducts.slice(0, 10).forEach((product, index) => {
       knowledgeBase += `${index + 1}. **${product.name}**\n`;
       knowledgeBase += `   ${product.name}\n`; // Duplicate name for search results format
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
@@ -940,8 +950,8 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       }
       knowledgeBase += `\n`;
     });
-    if (sqlProducts.length > 20) {
-      knowledgeBase += `... and ${sqlProducts.length - 20} more SQL products\n\n`;
+    if (sqlProducts.length > 10) {
+      knowledgeBase += `... and ${sqlProducts.length - 10} more SQL products\n\n`;
     }
     knowledgeBase += `=== END SQL PRODUCTS ===\n\n`;
     knowledgeBase += `CRITICAL: When a user asks "what are the SQL products" or "SQL products being sold", you MUST:\n`;
@@ -972,7 +982,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (emailCollabProducts.length > 0) {
     knowledgeBase += `\n=== EMAIL & COLLABORATION PRODUCTS (${emailCollabProducts.length} products) ===\n`;
     knowledgeBase += `These are ALL Email and Collaboration Tools in SkySecure Marketplace:\n\n`;
-    emailCollabProducts.slice(0, 20).forEach((product, index) => {
+    emailCollabProducts.slice(0, 10).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
@@ -986,16 +996,37 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       }
       knowledgeBase += `\n`;
     });
-    if (emailCollabProducts.length > 20) {
-      knowledgeBase += `... and ${emailCollabProducts.length - 20} more email/collaboration products\n\n`;
+    if (emailCollabProducts.length > 10) {
+      knowledgeBase += `... and ${emailCollabProducts.length - 10} more email/collaboration products\n\n`;
     }
     knowledgeBase += `=== END EMAIL & COLLABORATION PRODUCTS ===\n\n`;
+  }
+
+  // Add Power BI products - CRITICAL SECTION
+  if (powerBiProducts.length > 0) {
+    knowledgeBase += `\n=== POWER BI PRODUCTS (${powerBiProducts.length} products) ===\n`;
+    knowledgeBase += `These are ALL Power BI products in SkySecure Marketplace. DO NOT confuse these with Power Automate:\n\n`;
+    powerBiProducts.forEach((product, index) => {
+      knowledgeBase += `${index + 1}. **${product.name}**\n`;
+      knowledgeBase += `   Vendor: ${product.vendor}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
+      knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (link) {
+        knowledgeBase += `   Link: ${link}\n`;
+      }
+      if (product.description) {
+        knowledgeBase += `   Description: ${product.description.substring(0, 100)}\n`;
+      }
+      knowledgeBase += `\n`;
+    });
+    knowledgeBase += `=== END POWER BI PRODUCTS ===\n\n`;
   }
 
   if (includeFullList) {
     // Add ALL products list (comprehensive)
     knowledgeBase += `\nALL PRODUCTS LIST:\n`;
-    products.slice(0, 100).forEach((product, index) => {
+    products.slice(0, 50).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name} (${product.vendor})\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
@@ -1008,8 +1039,8 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       }
       knowledgeBase += `\n`;
     });
-    if (products.length > 100) {
-      knowledgeBase += `... and ${products.length - 100} more products\n\n`;
+    if (products.length > 50) {
+      knowledgeBase += `... and ${products.length - 50} more products\n\n`;
     }
   } else {
     knowledgeBase += `\nNOTE: The comprehensive product list is omitted for brevity. Use semantic search results to find specific products.\n\n`;
@@ -1020,7 +1051,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (featured.length > 0) {
     knowledgeBase += `\n=== FEATURED PRODUCTS (${featured.length} products) ===\n`;
     knowledgeBase += `These are the FEATURED products in SkySecure Marketplace:\n\n`;
-    featured.slice(0, 10).forEach((product, index) => {
+    featured.slice(0, 5).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
@@ -1034,8 +1065,8 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       }
       knowledgeBase += `\n`;
     });
-    if (featured.length > 10) {
-      knowledgeBase += `... and ${featured.length - 10} more featured products\n\n`;
+    if (featured.length > 5) {
+      knowledgeBase += `... and ${featured.length - 5} more featured products\n\n`;
     }
     knowledgeBase += `=== END FEATURED PRODUCTS ===\n\n`;
   } else {
@@ -1051,7 +1082,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (topSelling.length > 0) {
     knowledgeBase += `\n=== TOP SELLING / BEST SELLING PRODUCTS (${topSelling.length} products) ===\n`;
     knowledgeBase += `These are the BEST SELLING products in SkySecure Marketplace:\n\n`;
-    topSelling.slice(0, 10).forEach((product, index) => { // Limit to 10 for token management
+    topSelling.slice(0, 5).forEach((product, index) => { // Limit to 5 for token management
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
@@ -1065,8 +1096,8 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       }
       knowledgeBase += `\n`;
     });
-    if (topSelling.length > 10) {
-      knowledgeBase += `... and ${topSelling.length - 10} more best selling products\n\n`;
+    if (topSelling.length > 5) {
+      knowledgeBase += `... and ${topSelling.length - 5} more best selling products\n\n`;
     }
     knowledgeBase += `=== END BEST SELLING PRODUCTS ===\n\n`;
   } else {
@@ -1088,7 +1119,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
 
     knowledgeBase += `\n=== RECENTLY ADDED PRODUCTS (${sortedRecentlyAdded.length} products) ===\n`;
     knowledgeBase += `These are the RECENTLY ADDED products in SkySecure Marketplace:\n\n`;
-    sortedRecentlyAdded.slice(0, 10).forEach((product, index) => {
+    sortedRecentlyAdded.slice(0, 5).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
@@ -1102,10 +1133,11 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       }
       knowledgeBase += `\n`;
     });
-    if (sortedRecentlyAdded.length > 10) {
-      knowledgeBase += `... and ${sortedRecentlyAdded.length - 10} more recently added products\n\n`;
+    if (sortedRecentlyAdded.length > 5) {
+      knowledgeBase += `... and ${sortedRecentlyAdded.length - 5} more recently added products\n\n`;
     }
     knowledgeBase += `=== END RECENTLY ADDED PRODUCTS ===\n\n`;
+
   } else {
     knowledgeBase += `\n=== RECENTLY ADDED PRODUCTS (0 products) ===\n`;
     knowledgeBase += `Note: No products are currently marked as "recently added" in the system based on live data from the marketplace.\n`;

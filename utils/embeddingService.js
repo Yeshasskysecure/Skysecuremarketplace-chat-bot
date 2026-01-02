@@ -24,15 +24,21 @@ export async function createEmbeddings(chunks) {
       return [];
     }
 
-    // Limit chunks to prevent memory issues
-    const maxChunks = 100;
-    const limitedChunks = chunks.slice(0, maxChunks);
-
-    if (chunks.length > maxChunks) {
-      console.warn(`Limiting embeddings to ${maxChunks} chunks (out of ${chunks.length}) to prevent memory issues`);
+    // Check for empty input
+    if (!chunks || chunks.length === 0) {
+      return [];
     }
 
-    console.log(`Creating embeddings for ${limitedChunks.length} chunks...`);
+    // Process ALL chunks - Removing artificial 100 limit
+    // const maxChunks = 100;
+    // const limitedChunks = chunks.slice(0, maxChunks);
+    const limitedChunks = chunks;
+
+    if (chunks.length > 500) {
+      console.log(`Processing ${chunks.length} chunks for embeddings (this may take a moment)...`);
+    } else {
+      console.log(`Creating embeddings for ${chunks.length} chunks...`);
+    }
 
     // Ensure endpoint has trailing slash
     const endpoint = AZURE_OPENAI_ENDPOINT.endsWith('/')
