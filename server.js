@@ -20,6 +20,42 @@ dotenv.config();
 // Global flag to track if products have been indexed for semantic search
 let isIndexed = false;
 
+// Global Cache for Data (Approach #1 - Speed Optimization)
+let cachedProducts = null;
+let cachedSignals = null;
+let cachedCategoryHierarchy = null;
+let lastLoadTime = 0;
+const CACHE_TTL = 300000; // 5 minutes cache TTL
+
+/**
+ * Loads all marketplace data into memory if not already cached
+ * removing expensive File I/O from the chat loop.
+ */
+async function getMarketplaceData() {
+  const now = Date.now();
+  if (cachedProducts && (now - lastLoadTime < CACHE_TTL)) {
+    return {
+      products: cachedProducts,
+      signals: cachedSignals,
+      categories: cachedCategoryHierarchy
+    };
+  }
+
+  console.log("📂 Reloading marketplace data into memory cache...");
+  const [products, signals, categories] = await Promise.all([
+    loadProductsFromJSON(),
+    loadMarketplaceSignals(),
+    fetchCategoryHierarchy()
+  ]);
+
+  cachedProducts = products;
+  cachedSignals = signals;
+  cachedCategoryHierarchy = categories;
+  lastLoadTime = now;
+
+  return { products, signals, categories };
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -230,22 +266,19 @@ app.post("/api/chat", async (req, res) => {
     let relevantContent = "";
 
     // DYNAMIC: Parallelize data fetching and intent resolution for speed
-    console.log("🚀 Starting parallel data fetch and intent resolution...");
-    const productsPromise = loadProductsFromJSON();
-    const signalsPromise = loadMarketplaceSignals();
-    const categoryPromise = fetchCategoryHierarchy();
+    console.log("🚀 Initializing optimized data access...");
+    const dataFetchPromise = getMarketplaceData();
     const intentPromise = resolveIntent(message, baseUrl);
 
     // Await intent resolution early as it's needed for stage inference
     const intentInfo = await intentPromise;
 
-    // FAST TRACK: Handle greetings and off-topic questions quickly
+    // FAST TRACK: Handle greetings and off-topic questions quickly... (logic continues)
     const greeting = isGreeting(message);
     const domainRelated = isDomainRelated(message, intentInfo);
 
     if (greeting || !domainRelated) {
-      console.log(`⚡ Fast-tracking ${greeting ? 'greeting' : 'off-topic'} response`);
-
+      // ... (Fast track code remains same for safety)
       const fastSystemPrompt = `You are a helpful virtual assistant for SkySecure Marketplace.
       ${greeting ? 'The user just said hello. Respond with a warm, professional greeting and briefly ask how you can help them with software or IT needs.' : 'The user asked something outside the scope of software and IT. Politely inform them that you specialize in SkySecure Marketplace products and services.'}
       Format your response with markdown and keep it concise.`;
@@ -279,186 +312,66 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const conversationStage = inferConversationStage(conversationHistory, message, intentInfo);
-
-    // Track conversation state using new conversation manager
     const conversationState = trackConversationState(conversationHistory, message, intentInfo);
     console.log(`Conversation state: Stage=${conversationState.stage}, Confidence=${conversationState.confidence}`);
     const stagePrompt = getStagePrompt(conversationState.stage, conversationState.context);
     const quickReplies = suggestQuickReplies(conversationState.stage, intentInfo);
 
-    // Load products from JSON file
-    console.log("Loading products from products_normalized.json...");
-    const productsFromJSON = await productsPromise;
+    // Use Optimized Memory Cache
+    const { products: productsFromJSON, signals: marketplaceSignals, categories: categoryDataRaw } = await dataFetchPromise;
 
     // Index products with embeddings for semantic search - ONLY ONCE
     if (productsFromJSON.length > 0 && !isIndexed) {
       console.log("Indexing products with embeddings for semantic search (First Run)...");
       const productChunks = productsToTextChunks(productsFromJSON);
-
-      // Index in background or wait with timeout
       try {
         await Promise.race([
           indexProductChunks(productChunks),
-          new Promise((resolve) => setTimeout(() => resolve(), 30000)) // 30s timeout
+          new Promise((resolve) => setTimeout(() => resolve(), 30000))
         ]);
         isIndexed = true;
         console.log("✅ Semantic search indexing complete");
       } catch (err) {
-        console.warn("Product indexing failed, continuing without semantic search:", err.message);
+        console.warn("Product indexing failed:", err.message);
       }
-    } else if (productsFromJSON.length > 0) {
-      console.log("Using cached product embeddings (already indexed)");
     }
 
-    // Get relevant content using semantic search on products (only if indexed)
+    // Get relevant content using semantic search
     let relevantContentPromise = Promise.resolve("");
     if (productsFromJSON.length > 0 && isIndexed) {
-      console.log("Finding relevant products using semantic search...");
-      relevantContentPromise = Promise.race([
-        getRelevantContent(message, 15), // Increased from 10 to 15 relevant products
-        new Promise((resolve) => setTimeout(() => resolve(""), 5000)) // Increased timeout to 5s
-      ]).catch(err => {
-        console.warn("Semantic search failed:", err.message);
-        return "";
-      });
-    } else {
-      if (!isIndexed) console.log("Skipping semantic search - Index not ready yet");
+      console.log("Finding relevant products via Semantic Cache...");
+      relevantContentPromise = getRelevantContent(message, 10).catch(() => "");
     }
 
-    // Use products loaded from JSON file
-    console.log("Using products from JSON file...");
     let products = productsFromJSON || [];
-    let productFetchError = null;
-
-    // Load marketplace signals and enrich products
-    console.log("Loading marketplace signals...");
-    const { marketplaceSignals, categoryRankings, oemRankings } = await signalsPromise;
+    const { categoryRankings, oemRankings } = (marketplaceSignals || {});
 
     // Await semantic search result
     relevantContent = await relevantContentPromise;
-    console.log(`Semantic search returned ${relevantContent.length} characters of relevant content`);
 
-    // Enrich products with marketplace signals (set flags)
+    // Enrich products with cached signals (Optimized)
     if (marketplaceSignals) {
-      // Set best selling flag
-      if (marketplaceSignals.bestSelling && Array.isArray(marketplaceSignals.bestSelling)) {
-        const bestSellingProducts = resolveProductsByIds(marketplaceSignals.bestSelling, products);
-        bestSellingProducts.forEach(product => {
-          product.isTopSelling = true;
-        });
-        console.log(`✅ Marked ${bestSellingProducts.length} products as best selling`);
+      if (marketplaceSignals.bestSelling) {
+        resolveProductsByIds(marketplaceSignals.bestSelling, products).forEach(p => p.isTopSelling = true);
       }
-
-      // Set featured flag
-      if (marketplaceSignals.featured && Array.isArray(marketplaceSignals.featured)) {
-        const featuredProducts = resolveProductsByIds(marketplaceSignals.featured, products);
-        featuredProducts.forEach(product => {
-          product.isFeatured = true;
-        });
-        console.log(`✅ Marked ${featuredProducts.length} products as featured`);
+      if (marketplaceSignals.featured) {
+        resolveProductsByIds(marketplaceSignals.featured, products).forEach(p => p.isFeatured = true);
       }
-
-      // Set recently added flag
-      if (marketplaceSignals.recentlyAdded && Array.isArray(marketplaceSignals.recentlyAdded)) {
-        const recentlyAddedIds = marketplaceSignals.recentlyAdded.map(item =>
-          typeof item === 'object' ? item.productId : item
-        );
-        const recentlyAddedProducts = resolveProductsByIds(recentlyAddedIds, products);
-        recentlyAddedProducts.forEach(product => {
-          product.isLatest = true;
-        });
-        console.log(`✅ Marked ${recentlyAddedProducts.length} products as recently added`);
+      if (marketplaceSignals.recentlyAdded) {
+        const recentlyAddedIds = marketplaceSignals.recentlyAdded.map(item => typeof item === 'object' ? item.productId : item);
+        resolveProductsByIds(recentlyAddedIds, products).forEach(p => p.isLatest = true);
       }
     }
 
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`📊 PRODUCTS RETRIEVED FOR KNOWLEDGE BASE`);
-    console.log(`${'='.repeat(80)}`);
-    console.log(`Total Products Retrieved: ${products.length}`);
-
-    const featuredCount = products.filter(p => p.isFeatured).length;
-    const topSellingCount = products.filter(p => p.isTopSelling).length;
-    const recentlyAddedCount = products.filter(p => p.isLatest).length;
-    console.log(`Product Breakdown:`);
-    console.log(`  - Featured: ${featuredCount}`);
-    console.log(`  - Top Selling: ${topSellingCount}`);
-    console.log(`  - Recently Added: ${recentlyAddedCount}`);
-
-    // DYNAMIC SEARCH: Analyze user query for specific product searches
+    // DYNAMIC SEARCH: Analyze query (Optimized)
     const queryLower = message.toLowerCase();
     const searchTerms = [];
+    if (queryLower.includes('sql') || queryLower.includes('database')) searchTerms.push('SQL/Database');
+    if (queryLower.includes('email') || queryLower.includes('exchange') || queryLower.includes('outlook')) searchTerms.push('Email');
+    if (queryLower.includes('power bi')) searchTerms.push('Power BI');
+    if (queryLower.includes('power automate')) searchTerms.push('Power Automate');
 
-    // Detect SQL-related queries
-    if (queryLower.includes('sql') || queryLower.includes('database')) {
-      searchTerms.push('SQL/Database');
-      const sqlProducts = products.filter(p => {
-        const name = (p.name || '').toLowerCase();
-        const desc = (p.description || '').toLowerCase();
-        return name.includes('sql') || desc.includes('sql') || name.includes('database');
-      });
-      console.log(`\n🔍 DYNAMIC SEARCH: SQL/Database Products`);
-      console.log(`  Found ${sqlProducts.length} SQL/Database products:`);
-      sqlProducts.forEach((p, idx) => {
-        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
-      });
-    }
-
-    // Detect Email-related queries
-    if (queryLower.includes('email') || queryLower.includes('exchange') || queryLower.includes('outlook')) {
-      searchTerms.push('Email');
-      const emailProducts = products.filter(p => {
-        const name = (p.name || '').toLowerCase();
-        const desc = (p.description || '').toLowerCase();
-        return name.includes('email') || desc.includes('email') ||
-          name.includes('exchange') || name.includes('outlook');
-      });
-      console.log(`\n🔍 DYNAMIC SEARCH: Email Products`);
-      console.log(`  Found ${emailProducts.length} Email products:`);
-      emailProducts.forEach((p, idx) => {
-        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
-      });
-    }
-
-    // Detect Power BI-related queries
-    if (queryLower.includes('power bi')) {
-      searchTerms.push('Power BI');
-      const powerBiProducts = products.filter(p => {
-        const name = (p.name || '').toLowerCase();
-        const desc = (p.description || '').toLowerCase();
-        return name.includes('power bi');
-      });
-      console.log(`\n🔍 DYNAMIC SEARCH: Power BI Products`);
-      console.log(`  Found ${powerBiProducts.length} Power BI products:`);
-      powerBiProducts.forEach((p, idx) => {
-        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
-      });
-    }
-
-    // Detect Power Automate-related queries
-    if (queryLower.includes('power automate')) {
-      searchTerms.push('Power Automate');
-      const powerAutomateProducts = products.filter(p => {
-        const name = (p.name || '').toLowerCase();
-        const desc = (p.description || '').toLowerCase();
-        return name.includes('power automate');
-      });
-      console.log(`\n🔍 DYNAMIC SEARCH: Power Automate Products`);
-      console.log(`  Found ${powerAutomateProducts.length} Power Automate products:`);
-      powerAutomateProducts.forEach((p, idx) => {
-        console.log(`    ${idx + 1}. ${p.name} (${p.vendor}) - ${p.subCategory || p.category}`);
-      });
-    }
-
-    if (searchTerms.length > 0) {
-      console.log(`\n🎯 Search Terms Detected: ${searchTerms.join(', ')}`);
-    }
-
-    // EXPLICIT LOGGING: If both are found, or if one is found, cross-verify
-    if (queryLower.includes('power bi') && !queryLower.includes('power automate')) {
-      console.log("⚠️  ALERT: User asked for Power BI. Validating that Power Automate products are NOT being prioritized.");
-    }
-
-    // Group products by category for logging
+    // Group products for formatting
     const productsByCategory = {};
     products.forEach(p => {
       const cat = p.category || 'Uncategorized';
@@ -466,50 +379,28 @@ app.post("/api/chat", async (req, res) => {
       productsByCategory[cat].push(p);
     });
 
-    console.log(`\n📦 Products by Category:`);
-    Object.entries(productsByCategory).sort((a, b) => b[1].length - a[1].length).forEach(([cat, catProducts]) => {
-      console.log(`  ${cat}: ${catProducts.length} products`);
-    });
+    console.log(`✅ Knowledge Base Ready: ${products.length} products, ${searchTerms.length} active filters.`);
 
-    console.log(`${'='.repeat(80)}\n`);
-
-    if (products.length === 0 && productFetchError) {
-      console.error(`ERROR: Failed to fetch products from API: ${productFetchError}`);
-      console.error("This may indicate:");
-      console.error("1. PRODUCT_SERVICE_BACKEND_URL is incorrect or unreachable");
-      console.error("2. Network connectivity issues");
-      console.error("3. API authentication or permission issues");
-    }
-
-    // Fetch category hierarchy and OEMs (use promise from start)
-    console.log("Fetching category hierarchy and OEMs (awaiting promise)...");
+    // Build category hierarchy formatting (Optimized)
     let categoryHierarchy = "";
     try {
-      const categoryData = await Promise.race([
-        categoryPromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Category API timeout")), 2500)) // 2.5s timeout
-      ]);
-
       categoryHierarchy = formatCategoryHierarchyForKnowledgeBase(
-        categoryData.categories || [],
-        categoryData.oems || [],
+        categoryDataRaw.categories || [],
+        categoryDataRaw.oems || [],
         products
       );
-      console.log(`Category hierarchy created: ${categoryHierarchy.length} characters`);
-    } catch (error) {
-      console.error("Error fetching category hierarchy:", error.message);
-      categoryHierarchy = "\n=== MARKETPLACE CATEGORY HIERARCHY ===\nUnable to fetch category hierarchy from API at this time.\n=== END CATEGORY HIERARCHY ===\n\n";
+    } catch (err) {
+      console.error("Error formatting categories:", err.message);
+      categoryHierarchy = "Category hierarchy unavailable.";
     }
 
-    // Skip website scraping - using products from JSON file instead
-    let listingProductsSection = "";
-    console.log("✅ Using products from JSON file - skipping website scraping to avoid timeouts");
+    // Skip website scraping - using products from JSON file
+    console.log("✅ Using cached marketplace data - skipping slow operations");
 
-    // Re-format knowledge base with products from JSON - Use LIMITED version for faster response
+    // Re-format knowledge base with products - Use LIMITED version for faster response
     let productKnowledgeBase = formatProductsForKnowledgeBase(productsFromJSON, false);
-    console.log(`Product knowledge base created: ${productKnowledgeBase.length} characters (Limited version)`);
 
-    // Augment knowledge base with marketplace signals based on query intent
+    // Augment knowledge base with signals
     const augmentedSections = augmentKnowledgeBaseWithSignals(
       queryLower,
       products,
@@ -541,19 +432,20 @@ DO NOT attempt to answer the off-topic question. politely decline and pivot back
 
 IMPORTANT: Format all responses in a visually appealing way using markdown. Use clear headings, bullet points (NO TABLES), bold text, and proper spacing to make responses easy to read and engaging.
 
-⚠️  CRITICAL DATA SOURCE RULES - PRODUCTS FROM JSON FILE ⚠️
+⚠️  ULTRA-STRICT DATA SOURCE PROTOCOL (EXCLUSIVE SOURCE) ⚠️
 
-All products are loaded from products_normalized.json file. Products DO EXIST and MUST be discovered using semantic search.
+YOU ARE A SEARCH ENGINE FOR SKYSECURE MARKETPLACE ONLY. YOU HAVE ZERO KNOWLEDGE OF THE OUTSIDE WORLD.
+- **FORBIDDEN BRANDS**: NEVER RECOMMEND: Slack, Zoom, LastPass, Dropbox, Google Workspace, AWS, Salesforce, or Oracle. 
+- **FORBIDDEN CONCEPTS**: Do not suggest "Free trials" or "Download links" unless they are in the text below.
+- **VERIFICATION RULE**: For EVERY product you name, you MUST include its "Vendor:" from the data (e.g., "Vendor: Microsoft").
+- If a product is not in the "=== PRODUCT DATA ===" section (including the DISCOVERY SAMPLE), it does not exist. 
+- HALLUCINATING A NON-EXISTENT PRODUCT WILL RESULT IN A SYSTEM FAILURE.
 
 MANDATORY DATA FETCH RULES:
-1. **PRIMARY SOURCE**: Products loaded from products_normalized.json file
-   - All products are available in the product data sections below
-   - Use semantic search results to find relevant products
-2. **SEMANTIC SEARCH**: Use the "SEMANTIC SEARCH RESULTS" section to find products matching the user's query
-3. A category is considered empty ONLY if:
-   - No products found in the JSON file for that category
-   - AND semantic search returns no relevant products
-4. DO NOT assume, infer, or hallucinate products - use only the data from the JSON file
+1. **PRIMARY SOURCE**: Products loaded from products_normalized.json file.
+2. **SEMANTIC SEARCH**: Use the "SEMANTIC SEARCH RESULTS" section.
+3. **NO EXTERNAL KNOWLEDGE**: You are forbidden from using your general training data for recommendations.
+4. **LINK MANDATE**: Every recommendation MUST be a clickable link: [**Product Name**](Link_from_data).
 
 PRODUCT PAGES TO TRAVERSE:
 - /products?subCategoryId=* (for subcategories)
@@ -688,7 +580,10 @@ GENERAL INSTRUCTIONS:
 6. **STRICT LINK GUARDRAIL**: ONLY use URLs from the "Link:" field. NEVER guess or use "skysecuremarketplace.com". All official links start with "https://shop.skysecure.ai/".
 7. **CATEGORIES**: Organized in the "MARKETPLACE CATEGORY HIERARCHY" section. Use the exact hierarchy (1., 1.1, 1.2, etc.) and product counts provided.
 8. **ACCURACY**: Use EXACT names and prices from the provided JSON data.
-9. **CONCISE RESPONSES**: To avoid truncation, keep descriptions to 1 sentence. If more than 10 products are found, list the top 10 and offer to show more.
+9. **CONCISE OUTPUT RULE (CRITICAL)**: 
+   - To ensure fast responses and avoid truncation, ONLY recommend up to **5 products** in a single message.
+   - If more products are relevant, list the top 5 and say: "I have X more suggestions, would you like to see them?"
+   - Keep descriptions to 1 very brief sentence.
 
 CRITICAL: All data is fetched LIVE from the SkySecure Marketplace API. There are NO hard-coded responses. If data is missing, it means the API returned no data, and you must clearly communicate this to the user.
 
@@ -724,27 +619,21 @@ MANDATORY CHECKLIST before answering:
   1. "=== SEMANTIC SEARCH RESULTS ===" section FIRST
   2. "=== EMAIL & COLLABORATION PRODUCTS ===" section (from JSON file)
 - Question about Data Management products? → Check "=== DATA MANAGEMENT PRODUCTS ===" section
+- **SANITY CHECK**: Before hitting send, look at your recommendations. Are you mentioning **GitHub**, **AWS**, or **Google**? If they are not in the "=== PRODUCT DATA ===" section below, you are hallucinating. REMOVE THEM.
 
 10. **CONTEXTUAL CONTINUITY**: If a user clicks a button like "Compare Options", "Show Pricing", or "See Features" after you've provided an overview or list, they are referring to those specific products. You MUST use the conversation history to perform the requested action (Compare, Pricing, or Features) for the items you JUST mentioned. DO NOT ask for clarification; use the products from the previous bot message.
 
 The data is comprehensive and accurate - USE IT!
 
-11. **URL INTEGRITY (CRITICAL)**: 
-    - NEVER shorten, truncate, or "fix" URLs.
-    - Product IDs at the end of URLs (e.g., "...--6895f3b1ef1ca6239ac8b94b") must be 24 characters long.
-    - COPY THE EXACT URL from the "Link:" field, character-for-character.
-    - If a URL looks long, IT IS CORRECT. Do not cut it off.
-    - Truncating a URL breaks the link and is a critical failure.
-    - Validate that the URL ends with the full 24-character hex ID if present in the source.
-    - Example of CORRECT URL: https://shop.skysecure.ai/...--6895f3c3ef1ca6239ac8d0c5
-    - Example of BROKEN URL: https://shop.skysecure.ai/...--6895f3c3ef1ca (MISSING LAST 12 CHARS)
-    - YOU MUST OUTPUT THE FULL 24-CHAR ID. DO NOT STOP HALFWAY.
+11. **URL INTEGRITY**: ALWAYS copy product URLs exactly as provided in the "Link:" field. DO NOT shorten or truncate them. All product links MUST be clickable markdown: [**Product Name**](Full_URL). 
+     Note: If a URL seems long, it is correct. Provide it in full.
 
-12. **SELF-CORRECTION PHASE**: 
-    Before outputting any link, perform this mental check:
-    - "Does this URL end with a 12-character string like '6895f3c3ef1ca'?" -> STOP! IT IS BROKEN.
-    - "Does it end with a 24-character string like '6895f3c3ef1ca6239ac8d0c5'?" -> GOOD.
-    - You MUST use the full, long ID.`;
+CONVERSATION STATE: ${conversationStage}
+CONVERSATION STAGE (Guided Sales): ${conversationState.stage}
+STAGE CONFIDENCE: ${conversationState.confidence}
+RESOLVED INTENT: ${intentInfo.categoryName || ''}
+${stagePrompt}
+`;
 
     // Build conversation messages
     const messages = [
@@ -754,12 +643,19 @@ The data is comprehensive and accurate - USE IT!
       },
     ];
 
-    // Add conversation history (last 10 messages to avoid token limits)
+    // Add conversation history (last 10 messages)
+    // OPTIMIZATION: Truncate very long history items to prevent prompt bloat & response cut-off
     const recentHistory = conversationHistory.slice(-10);
     recentHistory.forEach((msg) => {
+      let content = msg.text || "";
+      if (content.length > 1200) {
+        console.log(`✂️ Truncating long history message (${content.length} chars)`);
+        content = content.substring(0, 800) + "\n... [truncated for brevity] ...\n" + content.substring(content.length - 200);
+      }
+
       messages.push({
         role: msg.from === "bot" ? "assistant" : "user",
-        content: msg.text,
+        content: content,
       });
     });
 
@@ -849,29 +745,32 @@ The data is comprehensive and accurate - USE IT!
       }
     });
 
-    // Regex: Splits the URL into [Slug] and [ID] using the last occurrence of '--'
-    const linkRegex = /https:\/\/shop\.skysecure\.ai\/products\/([^\s"')]*)--([a-f0-9]+)/gi;
+    // Regex: Splits the URL into [Slug] and optional [ID] using the last occurrence of '--'
+    // This flexible regex catches links even if they are truncated mid-slug or mid-ID
+    const linkRegex = /https:\/\/shop\.skysecure\.ai\/products\/([^\s"')]*)?(?:--)?([a-f0-9]+)?/gi;
 
     fixedResponse = fixedResponse.replace(linkRegex, (fullMatch, slugCandidate, idCandidate) => {
+      // Avoid matching empty product base URL
+      if (!slugCandidate && !idCandidate) return fullMatch;
+
       const slug = slugCandidate ? slugCandidate.toLowerCase() : '';
-      const id = idCandidate.toLowerCase();
+      const id = idCandidate ? idCandidate.toLowerCase() : '';
 
       // 1. If ID is perfect and valid, keep it.
       if (id.length === 24 && validIdMap.has(id)) {
         return fullMatch;
       }
 
-      console.log(`🔍 Link Fixer started for: ${fullMatch}`);
+      console.log(`🔍 Deep Link Repair started for fragment: ${fullMatch}`);
       let repairedUrl = null;
 
       // 2. Exact Full Slug Match
-      if (slugMap.has(slug)) {
+      if (slug && slugMap.has(slug)) {
         repairedUrl = slugMap.get(slug);
-        console.log(`   - Repaired via Full Slug: ${slug}`);
       }
 
-      // 3. Simple Slug / Alias / Fuzzy Segment Match
-      if (!repairedUrl) {
+      // 3. Simple Slug / Alias / Fragment Match
+      if (!repairedUrl && slug) {
         const slugParts = slug.split('--');
         const lastSegment = slugParts[slugParts.length - 1];
 
@@ -885,13 +784,11 @@ The data is comprehensive and accurate - USE IT!
 
         if (simpleSlugMap.has(target)) {
           repairedUrl = simpleSlugMap.get(target);
-          console.log(`   - Repaired via Segment/Alias: ${lastSegment} -> ${target}`);
         } else {
-          // Final Fuzzy Fallback for Segments
+          // Final Fuzzy Fallback for Fragments
           for (const [validSimple, url] of simpleSlugMap.entries()) {
             if (validSimple.startsWith(lastSegment) || lastSegment.startsWith(validSimple)) {
               repairedUrl = url;
-              console.log(`   - Repaired via Fuzzy Segment: ${lastSegment} -> ${validSimple}`);
               break;
             }
           }
@@ -926,8 +823,16 @@ The data is comprehensive and accurate - USE IT!
       return fullMatch;
     });
 
-    // Update the response with the fixed version
-    const finalResponse = fixedResponse;
+    // Final Safety: Close any truncated markdown links at the very end
+    let finalResponse = fixedResponse;
+    if (finalResponse.lastIndexOf('[') > finalResponse.lastIndexOf(']')) {
+      const lastOpenParen = finalResponse.lastIndexOf('(');
+      const lastCloseParen = finalResponse.lastIndexOf(')');
+      if (lastOpenParen > lastCloseParen) {
+        console.log("🛠️ Auto-closing truncated markdown link at end of response");
+        finalResponse += ')';
+      }
+    }
 
     // Ensure CORS headers are set in response
     res.header('Access-Control-Allow-Origin', '*');

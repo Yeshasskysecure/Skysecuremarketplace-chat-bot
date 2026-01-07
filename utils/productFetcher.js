@@ -1026,7 +1026,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
   if (includeFullList) {
     // Add ALL products list (comprehensive)
     knowledgeBase += `\nALL PRODUCTS LIST:\n`;
-    products.slice(0, 50).forEach((product, index) => {
+    products.slice(0, 20).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name} (${product.vendor})\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
@@ -1035,15 +1035,27 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
         knowledgeBase += `   Link: ${link}\n`;
       }
       if (product.description) {
-        knowledgeBase += `   Description: ${product.description.substring(0, 100)}...\n`;
+        knowledgeBase += `   Description: ${product.description.substring(0, 80)}...\n`;
       }
       knowledgeBase += `\n`;
     });
-    if (products.length > 50) {
-      knowledgeBase += `... and ${products.length - 50} more products\n\n`;
+    if (products.length > 20) {
+      knowledgeBase += `... and ${products.length - 20} more products\n\n`;
     }
   } else {
-    knowledgeBase += `\nNOTE: The comprehensive product list is omitted for brevity. Use semantic search results to find specific products.\n\n`;
+    // DISCOVERY FALLBACK: Even if full list is off, provide a sample to prevent hallucination
+    knowledgeBase += `\n=== DISCOVERY SAMPLE (20 products) ===\n`;
+    knowledgeBase += `Use these as general recommendations if no specific search results were found:\n\n`;
+    products.slice(0, 20).forEach((product, index) => {
+      knowledgeBase += `${index + 1}. ${product.name}\n`;
+      knowledgeBase += `   Vendor: ${product.vendor}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (link) knowledgeBase += `   Link: ${link}\n`;
+      if (product.description) knowledgeBase += `   Description: ${product.description.substring(0, 80)}...\n`;
+      knowledgeBase += `\n`;
+    });
+    knowledgeBase += `=== END DISCOVERY SAMPLE ===\n\n`;
   }
 
   // Add featured products - CRITICAL SECTION

@@ -269,7 +269,7 @@ export function isDomainRelated(message, intent) {
   // High-confidence tech/marketplace keywords
   const techKeywords = [
     'software', 'license', 'subscription', 'price', 'plan', 'billing',
-    'microsoft', 'google', 'aws', 'azure', 'cloud', 'security',
+    'microsoft', 'azure', 'cloud', 'security',
     'teams', 'office', 'defender', 'sql', 'database', 'server',
     'marketplace', 'buy', 'purchase', 'trial', 'download', 'install',
     'it services', 'enterprise', 'saas', 'crm', 'erp',
