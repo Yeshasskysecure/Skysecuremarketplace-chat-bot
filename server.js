@@ -14,6 +14,7 @@ import { indexContent, indexProductChunks, getRelevantContent, needsUpdate } fro
 import { trackConversationState, getStagePrompt, generateGuidingQuestion, suggestQuickReplies } from "./utils/conversationManager.js";
 import { loadProductsFromJSON, productsToTextChunks } from "./utils/productLoader.js";
 import { loadMarketplaceSignals, resolveProductsByIds } from "./utils/marketplaceSignalsLoader.js";
+import { getUserTenantContext } from "./utils/userTenantService.js";
 
 dotenv.config();
 
@@ -225,6 +226,28 @@ app.post("/api/chat", async (req, res) => {
 
     console.log(`Processing chat request: "${message.substring(0, 50)}..."`);
 
+    // Extract user identification from request
+    // Support both Authorization header and request body
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    const accessToken = authHeader?.startsWith('Bearer ') 
+      ? authHeader.substring(7) 
+      : req.body.accessToken || null;
+    const userId = req.body.userId || req.headers['x-user-id'] || null;
+
+    // DEBUG: Log user identification extraction
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`🔍 USER IDENTIFICATION DEBUG`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`Authorization Header Present: ${!!authHeader}`);
+    console.log(`AccessToken from Header: ${accessToken ? `${accessToken.substring(0, 20)}...` : 'null'}`);
+    console.log(`AccessToken from Body: ${req.body.accessToken ? `${req.body.accessToken.substring(0, 20)}...` : 'null'}`);
+    console.log(`UserId from Body: ${req.body.userId || 'null'}`);
+    console.log(`UserId from Header (x-user-id): ${req.headers['x-user-id'] || 'null'}`);
+    console.log(`Final AccessToken: ${accessToken ? 'PRESENT' : 'MISSING'}`);
+    console.log(`Final UserId: ${userId || 'MISSING'}`);
+    console.log(`AUTH_SERVICE_URL: ${process.env.AUTH_SERVICE_URL || 'https://auth.skysecure.ai (default)'}`);
+    console.log(`${'='.repeat(80)}\n`);
+
     // Load products from JSON file instead of scraping/API
     const baseUrl = process.env.KNOWLEDGE_BASE_URL || "https://shop.skysecure.ai/";
     let relevantContent = "";
@@ -246,8 +269,23 @@ app.post("/api/chat", async (req, res) => {
     if (greeting || !domainRelated) {
       console.log(`⚡ Fast-tracking ${greeting ? 'greeting' : 'off-topic'} response`);
 
+      // Fetch user tenant context for fast-track responses too (non-blocking)
+      let fastUserTenantContext = "";
+      if (greeting) {
+        try {
+          const tenantContextPromise = getUserTenantContext(userId, accessToken);
+          fastUserTenantContext = await Promise.race([
+            tenantContextPromise,
+            new Promise((resolve) => setTimeout(() => resolve(""), 3000)) // 3s timeout for fast track
+          ]).catch(() => "");
+        } catch (error) {
+          // Ignore errors in fast track
+        }
+      }
+
       const fastSystemPrompt = `You are a helpful virtual assistant for SkySecure Marketplace.
       ${greeting ? 'The user just said hello. Respond with a warm, professional greeting and briefly ask how you can help them with software or IT needs.' : 'The user asked something outside the scope of software and IT. Politely inform them that you specialize in SkySecure Marketplace products and services.'}
+      ${fastUserTenantContext ? `\n\nUSER'S TENANT INFORMATION:\n${fastUserTenantContext}\n\nIf the user asks about their licenses or subscriptions, use the information above.` : ''}
       Format your response with markdown and keep it concise.`;
 
       const fastMessages = [
@@ -285,6 +323,44 @@ app.post("/api/chat", async (req, res) => {
     console.log(`Conversation state: Stage=${conversationState.stage}, Confidence=${conversationState.confidence}`);
     const stagePrompt = getStagePrompt(conversationState.stage, conversationState.context);
     const quickReplies = suggestQuickReplies(conversationState.stage, intentInfo);
+
+    // Fetch user tenant context (non-blocking, with timeout)
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`🔍 FETCHING USER TENANT CONTEXT`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`Starting tenant context fetch...`);
+    let userTenantContext = "";
+    try {
+      const tenantContextPromise = getUserTenantContext(userId, accessToken);
+      userTenantContext = await Promise.race([
+        tenantContextPromise,
+        new Promise((resolve) => setTimeout(() => resolve(""), 5000)) // 5s timeout
+      ]).catch(err => {
+        console.error(`❌ Error in tenant context promise: ${err.message}`);
+        console.error(`Stack: ${err.stack}`);
+        return "";
+      });
+
+      console.log(`Tenant context fetch completed`);
+      console.log(`Context length: ${userTenantContext.length} characters`);
+      if (userTenantContext) {
+        console.log(`✅ User tenant context retrieved successfully`);
+        console.log(`First 300 chars of context:\n${userTenantContext.substring(0, 300)}...`);
+      } else {
+        console.log(`⚠️  No user tenant context available`);
+        console.log(`Possible reasons:`);
+        console.log(`  1. User not authenticated (no userId or accessToken)`);
+        console.log(`  2. Tenant not connected`);
+        console.log(`  3. Auth service unavailable`);
+        console.log(`  4. API endpoint mismatch`);
+        console.log(`  5. Response structure mismatch`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to fetch user tenant context: ${error.message}`);
+      console.error(`Stack: ${error.stack}`);
+      // Continue without tenant context - don't fail the conversation
+    }
+    console.log(`${'='.repeat(80)}\n`);
 
     // Load products from JSON file
     console.log("Loading products from products_normalized.json...");
@@ -524,6 +600,16 @@ app.post("/api/chat", async (req, res) => {
     }
 
     // Build system prompt with knowledge base
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`🔍 BUILDING SYSTEM PROMPT`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`Including userTenantContext: ${userTenantContext ? 'YES' : 'NO'}`);
+    if (userTenantContext) {
+      console.log(`Tenant context length: ${userTenantContext.length} characters`);
+      console.log(`Tenant context preview:\n${userTenantContext.substring(0, 400)}...`);
+    }
+    console.log(`${'='.repeat(80)}\n`);
+    
     const systemPrompt = `You are a helpful, friendly, and visually-oriented virtual assistant for SkySecure Marketplace (Official URL: ${baseUrl}), similar to Amazon's Rufus. Your role is to help customers with questions about products, services, pricing, and general inquiries.
 
 ⛔ OUT OF SCOPE / OFF-TOPIC QUESTIONS:
@@ -607,6 +693,36 @@ RESOLVED INTENT: ${intentInfo.categoryName || ''} ${intentInfo.subCategoryId ? `
 LISTING URLS: ${(intentInfo.listingUrls || []).join(', ')}
 
 ${stagePrompt}
+
+${userTenantContext ? `\n${userTenantContext}\n` : ''}
+
+PERSONALIZATION INSTRUCTIONS:
+${userTenantContext ? `
+The user has connected their Microsoft 365 tenant to SkySecure. You have access to their current subscription and license information above.
+
+When the user asks questions like:
+- "What licenses do I have?"
+- "How many licenses are available?"
+- "What products am I subscribed to?"
+- "What's my license status?"
+- "Show me my subscriptions"
+
+You MUST:
+1. Reference the "USER'S MICROSOFT 365 TENANT INFORMATION" section above
+2. Provide accurate information about their current subscriptions, license counts, and status
+3. Use the exact subscription names, SKU part numbers, and license counts from the data above
+4. If they ask about a specific product, check if they have it in their subscriptions
+5. Be helpful and explain their license status clearly
+
+If the user asks about purchasing additional licenses or products they don't have, you can:
+- Show them available products from the marketplace
+- Compare their current subscriptions with available options
+- Help them understand what additional licenses they might need
+
+IMPORTANT: Always use the user's actual subscription data from the "USER'S MICROSOFT 365 TENANT INFORMATION" section when answering questions about their licenses or subscriptions.
+` : `
+The user has not connected their Microsoft 365 tenant or is not authenticated. You cannot provide personalized license information. If they ask about their licenses, politely inform them that they need to connect their tenant to SkySecure to view their subscription information.
+`}
 
 ${relevantContent ? `SEMANTIC SEARCH RESULTS (Most relevant products for this query):
 ${relevantContent}
