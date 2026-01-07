@@ -1,6 +1,46 @@
 import { makeRequest } from "./httpClient.js";
 
-const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || "https://auth.skysecure.ai";
+// AUTH_SERVICE_URL can be base URL or include /api/auth
+// Examples: "http://localhost:3000" or "http://localhost:3000/api/auth" or "https://auth.skysecure.ai"
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || "http://localhost:3002";
+
+/**
+ * Constructs the full API URL, handling cases where AUTH_SERVICE_URL may or may not include /api/auth
+ * @param {string} endpointPath - The endpoint path (e.g., "/api/auth/users/profile")
+ * @returns {string} - Full URL
+ */
+function constructAuthServiceUrl(endpointPath) {
+  // Remove leading slash from endpointPath if present
+  const cleanPath = endpointPath.startsWith('/') ? endpointPath.substring(1) : endpointPath;
+  
+  // Check if AUTH_SERVICE_URL already ends with /api/auth
+  if (AUTH_SERVICE_URL.endsWith('/api/auth')) {
+    // Base already has /api/auth, so we need to extract just the part after /api/auth
+    // endpointPath is like "api/auth/users/profile", so we need just "users/profile"
+    // Remove "api/auth/" prefix if it exists
+    let pathWithoutPrefix = cleanPath;
+    if (cleanPath.startsWith('api/auth/')) {
+      pathWithoutPrefix = cleanPath.substring('api/auth/'.length);
+    }
+    
+    // Ensure base URL doesn't have trailing slash
+    const baseUrl = AUTH_SERVICE_URL.endsWith('/') 
+      ? AUTH_SERVICE_URL.slice(0, -1) 
+      : AUTH_SERVICE_URL;
+    
+    const finalUrl = `${baseUrl}/${pathWithoutPrefix}`;
+    console.log(`🔗 URL Construction: ${AUTH_SERVICE_URL} + /${cleanPath} -> ${finalUrl}`);
+    return finalUrl;
+  } else {
+    // Base doesn't have /api/auth, so append the full path
+    const baseUrl = AUTH_SERVICE_URL.endsWith('/') 
+      ? AUTH_SERVICE_URL.slice(0, -1) 
+      : AUTH_SERVICE_URL;
+    const finalUrl = `${baseUrl}/${cleanPath}`;
+    console.log(`🔗 URL Construction: ${AUTH_SERVICE_URL} + /${cleanPath} -> ${finalUrl}`);
+    return finalUrl;
+  }
+}
 
 /**
  * Attempts to extract userId from JWT token (without verification)
@@ -92,7 +132,8 @@ export async function fetchUserTenantData(userId, accessToken = null) {
     if (accessToken) {
       try {
         console.log(`\n📡 Attempting authenticated endpoint...`);
-        const profileUrl = `${AUTH_SERVICE_URL}/api/auth/users/profile`;
+        // Construct URL properly (handles both base URL and URL with /api/auth)
+        const profileUrl = constructAuthServiceUrl('/api/auth/users/profile');
         console.log(`URL: ${profileUrl}`);
         console.log(`Headers: Authorization: Bearer ${accessToken.substring(0, 20)}...`);
         
@@ -109,10 +150,23 @@ export async function fetchUserTenantData(userId, accessToken = null) {
         console.log(`Response OK: ${response.ok}`);
 
         if (response.ok) {
-          userData = await response.json();
+          const responseData = await response.json();
           console.log(`✅ Successfully fetched user tenant data via authenticated endpoint`);
-          console.log(`Response data type: ${typeof userData}`);
-          console.log(`Response data keys: ${Object.keys(userData || {}).join(', ')}`);
+          console.log(`Response data type: ${typeof responseData}`);
+          console.log(`Response data keys: ${Object.keys(responseData || {}).join(', ')}`);
+          
+          // Handle wrapped response structure: { code, status, message, data }
+          // Extract actual user data from responseData.data if it exists
+          if (responseData && responseData.data) {
+            userData = responseData.data;
+            console.log(`✅ Extracted user data from wrapped response`);
+            console.log(`User data keys: ${Object.keys(userData || {}).join(', ')}`);
+          } else {
+            // If no wrapping, use response directly
+            userData = responseData;
+            console.log(`✅ Using response data directly (no wrapping detected)`);
+          }
+          
           console.log(`tenantConnected: ${userData?.tenantConnected}`);
           console.log(`tenantDetails present: ${!!userData?.tenantDetails}`);
           if (userData?.tenantDetails) {
@@ -148,7 +202,8 @@ export async function fetchUserTenantData(userId, accessToken = null) {
     if (!userData && finalUserId) {
       try {
         console.log(`\n📡 Attempting public endpoint (fallback)...`);
-        const publicUrl = `${AUTH_SERVICE_URL}/api/auth/users/me/${finalUserId}`;
+        // Construct URL properly (handles both base URL and URL with /api/auth)
+        const publicUrl = constructAuthServiceUrl(`/api/auth/users/me/${finalUserId}`);
         console.log(`URL: ${publicUrl}`);
         
         const response = await makeRequest(publicUrl, {
@@ -163,10 +218,23 @@ export async function fetchUserTenantData(userId, accessToken = null) {
         console.log(`Response OK: ${response.ok}`);
 
         if (response.ok) {
-          userData = await response.json();
+          const responseData = await response.json();
           console.log(`✅ Successfully fetched user tenant data via public endpoint`);
-          console.log(`Response data type: ${typeof userData}`);
-          console.log(`Response data keys: ${Object.keys(userData || {}).join(', ')}`);
+          console.log(`Response data type: ${typeof responseData}`);
+          console.log(`Response data keys: ${Object.keys(responseData || {}).join(', ')}`);
+          
+          // Handle wrapped response structure: { code, status, message, data }
+          // Extract actual user data from responseData.data if it exists
+          if (responseData && responseData.data) {
+            userData = responseData.data;
+            console.log(`✅ Extracted user data from wrapped response`);
+            console.log(`User data keys: ${Object.keys(userData || {}).join(', ')}`);
+          } else {
+            // If no wrapping, use response directly
+            userData = responseData;
+            console.log(`✅ Using response data directly (no wrapping detected)`);
+          }
+          
           console.log(`tenantConnected: ${userData?.tenantConnected}`);
           console.log(`tenantDetails present: ${!!userData?.tenantDetails}`);
           if (userData?.tenantDetails) {

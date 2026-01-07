@@ -281,7 +281,7 @@ app.post("/api/chat", async (req, res) => {
     console.log(`UserId from Header (x-user-id): ${req.headers['x-user-id'] || 'null'}`);
     console.log(`Final AccessToken: ${accessToken ? 'PRESENT' : 'MISSING'}`);
     console.log(`Final UserId: ${userId || 'MISSING'}`);
-    console.log(`AUTH_SERVICE_URL: ${process.env.AUTH_SERVICE_URL || 'https://auth.skysecure.ai (default)'}`);
+    console.log(`AUTH_SERVICE_URL: ${process.env.AUTH_SERVICE_URL || 'http://localhost:3000 (default)'}`);
     console.log(`${'='.repeat(80)}\n`);
 
     // Load products from JSON file instead of scraping/API
@@ -291,6 +291,13 @@ app.post("/api/chat", async (req, res) => {
     // DYNAMIC: Parallelize data fetching and intent resolution for speed
     console.log("🚀 Initializing optimized data access...");
     const dataFetchPromise = getMarketplaceData();
+
+    console.log("🚀 Starting parallel data fetch and intent resolution...");
+    console.log(`📝 Message: "${message}"`);
+    console.log(`🌐 Base URL: ${baseUrl}`);
+    const productsPromise = loadProductsFromJSON();
+    const signalsPromise = loadMarketplaceSignals();
+    const categoryPromise = fetchCategoryHierarchy();
     const intentPromise = resolveIntent(message, baseUrl);
 
     // Await intent resolution early as it's needed for stage inference
