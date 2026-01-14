@@ -4,13 +4,11 @@ import './polyfill.js';
 import express from "express";
 import dotenv from "dotenv";
 import { makeRequest } from "./utils/httpClient.js";
-import { fetchAllProducts, formatProductsForKnowledgeBase } from "./utils/productFetcher.js";
+import { formatProductsForKnowledgeBase } from "./utils/productFetcher.js";
 import { fetchCategoryHierarchy, formatCategoryHierarchyForKnowledgeBase } from "./utils/categoryFetcher.js";
-import { scrapeAllPages, scrapeListingProducts } from "./utils/websiteScraper.js";
 import { resolveIntent, inferConversationStage, isDomainRelated, isGreeting } from "./utils/intentMapper.js";
-import { scrapeEntireWebsite } from "./utils/comprehensiveScraper.js";
+
 // Embedding service re-enabled with optimizations
-import { indexContent, indexProductChunks, getRelevantContent, needsUpdate } from "./utils/embeddingService.js";
 import { trackConversationState, getStagePrompt, generateGuidingQuestion, suggestQuickReplies } from "./utils/conversationManager.js";
 import { loadProductsFromJSON, productsToTextChunks } from "./utils/productLoader.js";
 import { loadMarketplaceSignals, resolveProductsByIds } from "./utils/marketplaceSignalsLoader.js";
@@ -406,27 +404,27 @@ app.post("/api/chat", async (req, res) => {
 
 
     // Index products with embeddings for semantic search - ONLY ONCE
-    if (productsFromJSON.length > 0 && !isIndexed) {
-      console.log("Indexing products with embeddings for semantic search (First Run)...");
-      const productChunks = productsToTextChunks(productsFromJSON);
-      try {
-        await Promise.race([
-          indexProductChunks(productChunks),
-          new Promise((resolve) => setTimeout(() => resolve(), 30000))
-        ]);
-        isIndexed = true;
-        console.log("✅ Semantic search indexing complete");
-      } catch (err) {
-        console.warn("Product indexing failed:", err.message);
-      }
-    }
+    // if (productsFromJSON.length > 0 && !isIndexed) {
+    //   console.log("Indexing products with embeddings for semantic search (First Run)...");
+    //   const productChunks = productsToTextChunks(productsFromJSON);
+    //   try {
+    //     await Promise.race([
+    //       indexProductChunks(productChunks),
+    //       new Promise((resolve) => setTimeout(() => resolve(), 30000))
+    //     ]);
+    //     isIndexed = true;
+    //     console.log("✅ Semantic search indexing complete");
+    //   } catch (err) {
+    //     console.warn("Product indexing failed:", err.message);
+    //   }
+    // }
 
     // Get relevant content using semantic search
     let relevantContentPromise = Promise.resolve("");
-    if (productsFromJSON.length > 0 && isIndexed) {
-      console.log("Finding relevant products via Semantic Cache...");
-      relevantContentPromise = getRelevantContent(message, 10).catch(() => "");
-    }
+    // if (productsFromJSON.length > 0 && isIndexed) {
+    //   console.log("Finding relevant products via Semantic Cache...");
+    //   relevantContentPromise = getRelevantContent(message, 10).catch(() => "");
+    // }
 
     let products = productsFromJSON || [];
     const { categoryRankings, oemRankings } = (marketplaceSignals || {});
