@@ -86,39 +86,41 @@ async function buildDynamicCategoryMapping() {
           const subCategoryId = subCategory._id || subCategory.id;
 
           if (subCategoryId && subCategoryName) {
-            // Build keyword variations from subcategory name
+            // ... (keyword logic for subcategories)
             const nameWords = subCategoryName.split(/[\s-]+/).filter(w => w.length > 2);
             const names = [subCategoryName, ...nameWords];
-
-            // Add common variations based on subcategory name
-            if (subCategoryName.includes('data') || subCategoryName.includes('database')) {
-              names.push('sql', 'nosql', 'data products', 'data storage');
-            }
-            if (subCategoryName.includes('cloud')) {
-              names.push('azure', 'aws', 'cloud platform', 'cloud management');
-            }
-            if (subCategoryName.includes('collaboration')) {
-              names.push('teams', 'sharepoint', 'onedrive', 'teamwork', 'chat');
-            }
-            if (subCategoryName.includes('enterprise')) {
-              names.push('erp', 'crm', 'business apps', 'enterprise apps');
-            }
-            if (subCategoryName.includes('governance') || subCategoryName.includes('compliance')) {
-              names.push('regulatory', 'audit');
-            }
-            if (subCategoryName.includes('identity') || subCategoryName.includes('access')) {
-              names.push('iam', 'security', 'authentication', 'access management');
-            }
-            if (subCategoryName.includes('communication')) {
-              names.push('calling', 'video', 'conferencing');
-            }
+            // [Include existing variations logic here...]
+            if (subCategoryName.includes('data') || subCategoryName.includes('database')) names.push('sql', 'nosql', 'data products', 'data storage');
+            if (subCategoryName.includes('cloud')) names.push('azure', 'aws', 'cloud platform', 'cloud management');
+            if (subCategoryName.includes('collaboration')) names.push('teams', 'sharepoint', 'onedrive', 'teamwork', 'chat');
+            if (subCategoryName.includes('enterprise')) names.push('erp', 'crm', 'business apps', 'enterprise apps');
+            if (subCategoryName.includes('governance') || subCategoryName.includes('compliance')) names.push('regulatory', 'audit');
+            if (subCategoryName.includes('identity') || subCategoryName.includes('access')) names.push('iam', 'security', 'authentication', 'access management');
+            if (subCategoryName.includes('communication')) names.push('calling', 'video', 'conferencing');
 
             subCategoryMap.push({
               id: subCategoryId,
-              names: [...new Set(names)], // Remove duplicates
+              names: [...new Set(names)],
               label: subCategory.name || subCategory.title || subCategoryName
             });
           }
+
+          // Add Sub-Sub-Categories to mapping
+          const subSubs = subCategory.subSubcategories || subCategory.subSubCategories || subCategory.subSubs || [];
+          subSubs.forEach(ss => {
+            const ssName = (ss.name || ss.title || '').toLowerCase();
+            const ssId = ss._id || ss.id;
+            if (ssId && ssName) {
+              const ssNames = [ssName, ...ssName.split(/[\s-]+/).filter(w => w.length > 2)];
+              if (ssName.includes('ai') || ssName.includes('intelligence')) ssNames.push('artificial intelligence', 'copilot', 'ml', 'machine learning');
+
+              subCategoryMap.push({
+                id: ssId,
+                names: [...new Set(ssNames)],
+                label: ss.name || ss.title || ssName
+              });
+            }
+          });
         });
       });
 
@@ -268,13 +270,19 @@ export function isDomainRelated(message, intent) {
 
   // High-confidence tech/marketplace keywords
   const techKeywords = [
-    'software', 'license', 'subscription', 'price', 'plan', 'billing',
-    'microsoft', 'azure', 'cloud', 'security',
+    'software', 'license', 'licence', 'licensing', 'licencing', 'licens', 'licen', 'subscription', 'price', 'plan', 'billing',
+    'microsoft', 'azure', 'cloud', 'security', 'ai', 'copilot', 'artificial intelligence',
     'teams', 'office', 'defender', 'sql', 'database', 'server',
     'marketplace', 'buy', 'purchase', 'trial', 'download', 'install',
     'it services', 'enterprise', 'saas', 'crm', 'erp',
-    'categories', 'oems', 'best selling', 'best sellers', 'featured', 'browse',
-    'compare', 'comparison', 'options', 'details', 'pricing', 'features', 'show', 'see'
+    'categories', 'oems', 'best selling', 'best sellers', 'best_selling', 'featured', 'browse',
+    'recently added', 'new products', 'latest products', 'new arrivals', 'popular', 'top selling',
+    'compare', 'comparison', 'options', 'details', 'pricing', 'features', 'show', 'see', 'recommend', 'suggestion', 'add-on', 'addon', 'add on',
+    'existing', 'current', 'owned', 'my plans', 'my subscriptions', 'my products',
+    // Company & support queries
+    'contact', 'about', 'about us', 'careers', 'jobs', 'support', 'order', 'orders', 'feedback',
+    'refund', 'privacy', 'terms', 'conditions', 'policy', 'cookie', 'address', 'phone', 'whatsapp', 'email',
+    'skysecure', 'reach', 'help desk', 'cancel', 'return', 'review'
   ];
 
   if (techKeywords.some(k => text.includes(k))) return true;

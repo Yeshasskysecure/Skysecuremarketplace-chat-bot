@@ -34,7 +34,8 @@ export async function loadProductsFromJSON() {
       _id: product.id,
       name: product.name,
       category: product.category || 'Uncategorized',
-      subCategory: product.category || 'General', // Use category as subCategory if not specified
+      subCategory: product.subCategory || (product.category !== 'Software' ? product.category : 'General'),
+      subSubCategory: product.subSubCategory || (product.subCategory !== product.category ? product.subCategory : null),
       vendor: extractVendorFromProduct(product),
       price: getPrice(product),
       billingCycle: getBillingCycle(product),
@@ -77,21 +78,42 @@ function extractVendorFromProduct(product) {
     }
   }
 
-  // 2. Keyword matching from name/description
+  // 2. Keyword matching from name/description (STRICT WHOLE WORD)
   const name = (product.name || '').toLowerCase();
   const desc = (product.description?.raw || product.description?.clean || '').toLowerCase();
+  const searchableText = `${name} ${desc}`;
 
+  // Prioritize Microsoft and specific product brands first
   const vendorMap = {
+    'microsoft': 'Microsoft',
     'dynamics': 'Microsoft',
     'office 365': 'Microsoft',
-    'microsoft': 'Microsoft',
+    'azure': 'Microsoft',
+    'office': 'Microsoft',
+    'windows': 'Microsoft',
+    'exchange': 'Microsoft',
+    'sql server': 'Microsoft',
+    'skype': 'Microsoft',
+    'sharepoint': 'Microsoft',
+    'biztalk': 'Microsoft',
+    'intune': 'Microsoft',
+    'defender': 'Microsoft',
+    'teams': 'Microsoft',
+    'copilot': 'Microsoft',
+    'power bi': 'Microsoft',
+    'power automate': 'Microsoft',
+    'power apps': 'Microsoft',
+    'power pages': 'Microsoft',
+    'power platform': 'Microsoft',
+    'esu for sql': 'Microsoft',
+    'esu for windows': 'Microsoft',
+    'win server': 'Microsoft',
     'google': 'Google',
     'adobe': 'Adobe',
     'oracle': 'Oracle',
     'intel': 'Intel',
     'aws': 'AWS',
     'amazon web services': 'AWS',
-    'azure': 'Microsoft',
     'vmware': 'VMware',
     'cisco': 'Cisco',
     'sophos': 'Sophos',
@@ -138,12 +160,14 @@ function extractVendorFromProduct(product) {
   };
 
   for (const [key, value] of Object.entries(vendorMap)) {
-    if (name.includes(key) || desc.includes(key)) {
+    // Whole-word regex to avoid "Intelligence" matching "Intel"
+    const regex = new RegExp(`\\b${key}\\b`, 'i');
+    if (regex.test(searchableText)) {
       return value;
     }
   }
 
-  return 'Unknown Vendor';
+  return 'Microsoft'; // Default to Microsoft for SkySecure Marketplace
 }
 
 /**
@@ -151,9 +175,13 @@ function extractVendorFromProduct(product) {
  */
 function getPrice(product) {
   if (product.pricing) {
-    if (product.pricing.yearly) return product.pricing.yearly;
-    if (product.pricing.monthly) return product.pricing.monthly;
-    if (product.pricing.oneTime) return product.pricing.oneTime;
+    const p = product.pricing;
+    // Ignore emoji junk key (🔗) and return first real numeric price
+    if (p.triennial && p.triennial > 0) return p.triennial;
+    if (p.yearly && p.yearly > 0) return p.yearly;
+    if (p.monthly && p.monthly > 0) return p.monthly;
+    const oneTime = p.oneTime || p['one time'] || p['one-time'];
+    if (oneTime && oneTime > 0) return oneTime;
   }
   return 0;
 }
@@ -163,14 +191,20 @@ function getPrice(product) {
  */
 function getBillingCycle(product) {
   if (product.pricing) {
-    if (product.pricing.yearly) return 'Yearly';
-    if (product.pricing.monthly) return 'Monthly';
-    if (product.pricing.oneTime) return 'One Time';
+    const p = product.pricing;
+    // Ignore emoji junk key (🔗)
+    if (p.triennial && p.triennial > 0) return '3 Years';
+    if (p.yearly && p.yearly > 0) return 'Yearly';
+    if (p.monthly && p.monthly > 0) return 'Monthly';
+    const oneTime = p.oneTime || p['one time'] || p['one-time'];
+    if (oneTime && oneTime > 0) return 'One Time';
   }
   if (product.defaultPlan) {
-    if (product.defaultPlan === 'yearly') return 'Yearly';
-    if (product.defaultPlan === 'monthly') return 'Monthly';
-    if (product.defaultPlan === 'oneTime') return 'One Time';
+    const dp = product.defaultPlan.toLowerCase();
+    if (dp === 'triennial') return '3 Years';
+    if (dp === 'yearly') return 'Yearly';
+    if (dp === 'monthly') return 'Monthly';
+    if (dp === 'one time' || dp === 'one-time' || dp === 'onetime') return 'One Time';
   }
   if (product.raw?.subscriptionHint) {
     return product.raw.subscriptionHint;

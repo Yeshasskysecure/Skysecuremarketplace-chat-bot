@@ -1,124 +1,103 @@
 {
-  "bestSelling": [
-    "6895f3aeef1ca6239ac8b484",
-    "6895f3adef1ca6239ac8b2d8",
-    "6895f3a8ef1ca6239ac8ab8a",
-    "6895f3a8ef1ca6239ac8ab71",
-    "6895f3a6ef1ca6239ac8a91a",
-    "6895f3a4ef1ca6239ac8a61f",
-    "6895f3a4ef1ca6239ac8a606",
-    "6895f3a4ef1ca6239ac8a5ed",
-    "6895f3a4ef1ca6239ac8a5d4",
-    "6895f3a4ef1ca6239ac8a5bb",
-    "6895f3a4ef1ca6239ac8a592",
-    "6895f3a4ef1ca6239ac8a569",
-    "6895f3a4ef1ca6239ac8a540",
-    "6895f3a3ef1ca6239ac8a527",
-    "6895f3a3ef1ca6239ac8a50e",
-    "6895f3a3ef1ca6239ac8a4f5"
+  "scanDate": "2026-02-21T04:57:07.989Z",
+  "totalProducts": 510,
+  "summary": "Marketplace contains 510 products across 1 main categories.",
+  "bestSellingProducts": [
+    {
+      "id": "6895f3a4ef1ca6239ac8a569",
+      "name": "Microsoft 365 E3 (no Teams) - 3 year"
+    },
+    {
+      "id": "6895f3a5ef1ca6239ac8a705",
+      "name": "Microsoft 365 E5 Security"
+    },
+    {
+      "id": "6895f3a5ef1ca6239ac8a705",
+      "name": "Microsoft 365 E5 Security"
+    },
+    {
+      "id": "6895f3a4ef1ca6239ac8a661",
+      "name": "Microsoft 365 E5 Compliance"
+    }
   ],
-  "featured": [
-    "6895f3c6ef1ca6239ac8d3e5",
-    "6895f3c6ef1ca6239ac8d3cc",
-    "6895f3c5ef1ca6239ac8d23c",
-    "6895f3c5ef1ca6239ac8d223",
-    "6895f3c5ef1ca6239ac8d20a",
-    "6895f3c4ef1ca6239ac8d1f1",
-    "6895f3c4ef1ca6239ac8d18d",
-    "6895f3c4ef1ca6239ac8d15b",
-    "6895f3c4ef1ca6239ac8d142",
-    "6895f3c4ef1ca6239ac8d129",
-    "6895f3c3ef1ca6239ac8d0f7",
-    "6895f3c3ef1ca6239ac8d0de",
-    "6895f3c3ef1ca6239ac8d016",
-    "6895f3c2ef1ca6239ac8cf99",
-    "6895f3c2ef1ca6239ac8cf80",
-    "6895f3c2ef1ca6239ac8cf35",
-    "6895f3c0ef1ca6239ac8cda5",
-    "6895f3c0ef1ca6239ac8cd73",
-    "6895f3bfef1ca6239ac8cc92",
-    "6895f3bfef1ca6239ac8cc47"
+  "featuredProducts": [
+    {
+      "id": "6895f3a6ef1ca6239ac8a91a",
+      "name": "Microsoft Copilot Studio"
+    },
+    {
+      "id": "6895f3a3ef1ca6239ac8a50e",
+      "name": "Microsoft 365 Copilot for Sales"
+    },
+    {
+      "id": "6895f3a3ef1ca6239ac8a527",
+      "name": "Microsoft 365 Copilot for Service"
+    }
   ],
-  "recentlyAdded": [
+  "recentlyAddedProducts": [
     {
-      "productId": "6895f392ef1ca6239ac8872c",
-      "order": 508
+      "id": "6895f3a5ef1ca6239ac8a705",
+      "name": "Microsoft 365 E5 Security"
     },
     {
-      "productId": "6895f392ef1ca6239ac88755",
-      "order": 507
+      "id": "6895f3a4ef1ca6239ac8a661",
+      "name": "Microsoft 365 E5 Compliance"
     },
     {
-      "productId": "6895f392ef1ca6239ac8877e",
-      "order": 506
+      "id": "6895f3bdef1ca6239ac8cae9",
+      "name": "Office LTSC Professional Plus 2024"
     },
     {
-      "productId": "6895f392ef1ca6239ac887a7",
-      "order": 505
+      "id": "6895f3bdef1ca6239ac8cb02",
+      "name": "Office LTSC Standard 2024"
+    }
+  ],
+  "topCategories": [
+    {
+      "name": "Software",
+      "count": 510
+    }
+  ],
+  "topOems": [
+    {
+      "name": "Dynamics",
+      "count": 124
     },
     {
-      "productId": "6895f392ef1ca6239ac887d0",
-      "order": 504
+      "name": "Microsoft",
+      "count": 111
     },
     {
-      "productId": "6895f393ef1ca6239ac887f9",
-      "order": 503
+      "name": "Windows",
+      "count": 105
     },
     {
-      "productId": "6895f393ef1ca6239ac88822",
-      "order": 502
+      "name": "Power",
+      "count": 20
     },
     {
-      "productId": "6895f393ef1ca6239ac8884b",
-      "order": 501
+      "name": "Office",
+      "count": 12
     },
     {
-      "productId": "6895f393ef1ca6239ac88874",
-      "order": 500
+      "name": "Exchange",
+      "count": 12
     },
     {
-      "productId": "6895f393ef1ca6239ac8888d",
-      "order": 499
+      "name": "SQL",
+      "count": 10
     },
     {
-      "productId": "6895f393ef1ca6239ac888b6",
-      "order": 498
+      "name": "ESU",
+      "count": 10
     },
     {
-      "productId": "6895f393ef1ca6239ac888df",
-      "order": 497
+      "name": "Skype",
+      "count": 8
     },
     {
-      "productId": "6895f393ef1ca6239ac88908",
-      "order": 496
-    },
-    {
-      "productId": "6895f393ef1ca6239ac88931",
-      "order": 495
-    },
-    {
-      "productId": "6895f394ef1ca6239ac8895a",
-      "order": 494
-    },
-    {
-      "productId": "6895f394ef1ca6239ac88993",
-      "order": 493
-    },
-    {
-      "productId": "6895f394ef1ca6239ac889bc",
-      "order": 492
-    },
-    {
-      "productId": "6895f394ef1ca6239ac889e5",
-      "order": 491
-    },
-    {
-      "productId": "6895f394ef1ca6239ac88a0e",
-      "order": 490
-    },
-    {
-      "productId": "6895f394ef1ca6239ac88a37",
-      "order": 489
+      "name": "SharePoint",
+      "count": 8
     }
   ]
 }

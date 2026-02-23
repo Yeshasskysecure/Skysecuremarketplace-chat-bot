@@ -120,20 +120,20 @@ app.options("/api/chat", (req, res) => {
  * @param {Object} oemRankings - OEM rankings object
  * @returns {string} - Augmented knowledge base sections or empty string
  */
-function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignals, categoryRankings, oemRankings) {
+function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignals, categoryRankings, oemRankings, intentInfo) {
   let augmentedSections = "";
 
   // aa) POWER BI SPECIFIC SEARCH (CRITICAL)
-  if (queryLower.includes('power bi')) {
+  if (queryLower.includes('power bi') && !queryLower.includes('video conferencing') && !queryLower.includes('email')) {
     const powerBiProducts = products.filter(p => (p.name || '').toLowerCase().includes('power bi'));
     if (powerBiProducts.length > 0) {
       augmentedSections += `\n=== ACCURATE POWER BI PRODUCTS (${powerBiProducts.length} products) ===\n`;
-      augmentedSections += `MANDATORY: These are the ONLY Power BI products. Do NOT list Power Automate products for this query.\n\n`;
-      powerBiProducts.forEach((product, index) => {
+      augmentedSections += `MANDATORY: These are the ONLY Power BI products. Do NOT list Power Automate products for this query. ONLY recommend 3 products. Use FULL names.\n\n`;
+      powerBiProducts.slice(0, 3).forEach((product, index) => {
         augmentedSections += `${index + 1}. **${product.name}**\n`;
         augmentedSections += `   Vendor: ${product.vendor}\n`;
         augmentedSections += `   Price: ${product.price ? `₹${product.price.toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}` : "Contact Sales"}\n`;
-        const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
         if (link) augmentedSections += `   Link: ${link}\n`;
         augmentedSections += `\n`;
       });
@@ -141,18 +141,226 @@ function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignal
     }
   }
 
+  // ab) SMALL BUSINESS / BUSINESS PLANS (NEW)
+  if (queryLower.includes('small business') || queryLower.includes('business plan') || queryLower.includes('1-50') || queryLower.includes('startup')) {
+    const bizProducts = products.filter(p =>
+      (p.name || '').toLowerCase().includes('business') ||
+      (p.name || '').toLowerCase().includes('professional') ||
+      (p.name || '').toLowerCase().includes('pro')
+    ).filter(p => !p.name.toLowerCase().includes('add-on') && !p.name.toLowerCase().includes('storage'));
+
+    if (bizProducts.length > 0) {
+      augmentedSections += `\n=== RELEVANT BUSINESS PLANS FOR SMALL BUSINESS (${bizProducts.length} products) ===\n`;
+      augmentedSections += `MANDATORY: Recommmend these specific "Business" plans. Do NOT provide generic outside advice or mention products like "Zoom" if NOT in this list.\n\n`;
+      bizProducts.slice(0, 3).forEach((product, index) => {
+        augmentedSections += `${index + 1}. **${product.name}**\n`;
+        augmentedSections += `   Vendor: ${product.vendor}\n`;
+        augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+        if (link) augmentedSections += `   Link: ${link}\n`;
+        augmentedSections += `\n`;
+      });
+      augmentedSections += `=== END BUSINESS PLANS ===\n\n`;
+    }
+  }
+
+  // bb) ARTIFICIAL INTELLIGENCE & COPILOT SEARCH (ULTRA-STRICT)
+  if (queryLower.includes('ai') || queryLower.includes('artificial intelligence') || queryLower.includes('copilot') || queryLower.includes('machine learning')) {
+    const aiKeywords = ['ai', 'copilot', 'machine learning', 'artificial intelligence'];
+
+    // 1. Resolve products from official "Artificial Intelligence" and "Copilot" ranking sections
+    let officialAiProducts = [];
+    if (Array.isArray(categoryRankings)) {
+      for (const cat of categoryRankings) {
+        const subs = cat.subCategories || cat.subcategories || [];
+        for (const sub of subs) {
+          const subName = (sub.name || '').toLowerCase();
+          // Match "Artificial Intelligence" or "Copilot" subcategories
+          if (subName === 'artificial intelligence' || subName === 'copilot') {
+            if (sub.productIds) officialAiProducts = [...officialAiProducts, ...resolveProductsByIds(sub.productIds, products)];
+          }
+
+          const subSubs = sub.subSubs || sub.subSubcategories || [];
+          for (const ss of subSubs) {
+            const ssName = (ss.name || '').toLowerCase();
+            if (ssName === 'artificial intelligence' || ssName === 'copilot') {
+              if (ss.productIds) officialAiProducts = [...officialAiProducts, ...resolveProductsByIds(ss.productIds, products)];
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Keyword fallback (only if no official products OR to supplement up to 10)
+    let aiKeywordProducts = products.filter(p => {
+      const name = (p.name || '').toLowerCase();
+      const desc = (p.description?.overview || p.description || '').toLowerCase();
+      // Must have "ai" as a whole word or other keywords
+      return name.includes('copilot') || name.includes('artificial intelligence') ||
+        (name.split(/\s+/).includes('ai')) || (desc.includes('artificial intelligence'));
+    });
+
+    // Merge: Official first, then keyword matches
+    let finalAiList = [...new Set([...officialAiProducts, ...aiKeywordProducts])];
+
+    if (finalAiList.length > 0) {
+      augmentedSections += `\n=== ARTIFICIAL INTELLIGENCE (AI) SOLUTIONS (${finalAiList.length} products) ===\n`;
+      augmentedSections += `CRITICAL: Recommendations MUST stay 100% within this list. NEVER mention external tools like ChatGPT, Claude, or Gemini.\n\n`;
+      finalAiList.slice(0, 10).forEach((product, index) => {
+        augmentedSections += `${index + 1}. **${product.name}**\n`;
+        augmentedSections += `   Vendor: ${product.vendor}\n`;
+        augmentedSections += `   Price: ${product.price ? `₹${product.price.toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}` : "Contact Sales"}\n`;
+
+        // Fix category display
+        const cat = product.category;
+        const sub = (product.subCategory && product.subCategory !== product.category) ? product.subCategory : null;
+        let catDisplay = cat;
+        if (sub) catDisplay += ` > ${sub}`;
+        augmentedSections += `   Category: ${catDisplay}\n`;
+
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+        if (link) augmentedSections += `   Link: ${link}\n`;
+        augmentedSections += `\n`;
+      });
+      augmentedSections += `=== END AI SOLUTIONS ===\n\n`;
+    } else {
+      augmentedSections += `\n=== NO AI PRODUCTS FOUND ===\n`;
+      augmentedSections += `I could not find dedicated AI products. Inform the user we are constantly updating our catalog.\n`;
+      augmentedSections += `=== END AI SOLUTIONS ===\n\n`;
+    }
+  }
+
+  // bd) VIDEO CONFERENCING & COMMUNICATION (NEW)
+  if (queryLower.includes('video') || queryLower.includes('conference') || queryLower.includes('meeting') || queryLower.includes('teams') || queryLower.includes('skype')) {
+    const videoProducts = products.filter(p => {
+      const name = (p.name || '').toLowerCase();
+      const subCat = (p.subCategory || '').toLowerCase();
+      return name.includes('teams') || name.includes('skype') || subCat.includes('video');
+    });
+
+    if (videoProducts.length > 0) {
+      augmentedSections += `\n=== VIDEO CONFERENCING SOLUTIONS (${videoProducts.length} products) ===\n`;
+      augmentedSections += `MANDATORY: Recommmend these communication tools. Use FULL names and include direct Links.\n\n`;
+      videoProducts.slice(0, 5).forEach((product, index) => {
+        augmentedSections += `${index + 1}. **${product.name}**\n`;
+        augmentedSections += `   Vendor: ${product.vendor}\n`;
+        augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+        if (link) augmentedSections += `   Link: ${link}\n`;
+        augmentedSections += `\n`;
+      });
+      augmentedSections += `=== END VIDEO CONFERENCING SOLUTIONS ===\n\n`;
+    }
+  }
+
+  // bc) MICROSOFT 365 / OFFICE 365 SEARCH
+  if (queryLower.includes('microsoft 365') || queryLower.includes('m365') || queryLower.includes('office 365') || queryLower.includes('o365')) {
+    const m365Products = products.filter(p =>
+      (p.name || '').toLowerCase().includes('microsoft 365') ||
+      (p.name || '').toLowerCase().includes('office 365') ||
+      (p.name || '').toLowerCase().includes('m365')
+    ).filter(p => !p.name.toLowerCase().includes('add-on') && !p.name.toLowerCase().includes('storage'));
+
+    if (m365Products.length > 0) {
+      augmentedSections += `\n=== MICROSOFT 365 & OFFICE 365 PLANS (${m365Products.length} products) ===\n`;
+      augmentedSections += `MANDATORY: Use these exact plans. Recommend only the most relevant ones (Business for SMB, Enterprise for large corp).\n\n`;
+      m365Products.slice(0, 5).forEach((product, index) => {
+        augmentedSections += `${index + 1}. **${product.name}**\n`;
+        augmentedSections += `   Vendor: ${product.vendor}\n`;
+        augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+        if (link) augmentedSections += `   Link: ${link}\n`;
+        augmentedSections += `\n`;
+      });
+      augmentedSections += `=== END M365 PLANS ===\n\n`;
+    }
+  }
+
+  // bd) SECURITY SEARCH
+  if (queryLower.includes('security') || queryLower.includes('protection') || queryLower.includes('defender') || queryLower.includes('cyber')) {
+    const securityProducts = products.filter(p =>
+      (p.subCategory || '').toLowerCase() === 'security' ||
+      (p.name || '').toLowerCase().includes('security') ||
+      (p.name || '').toLowerCase().includes('defender') ||
+      (p.name || '').toLowerCase().includes('protection')
+    );
+    if (securityProducts.length > 0) {
+      augmentedSections += `\n=== SECURITY AND PROTECTION SOLUTIONS (${securityProducts.length} products) ===\n`;
+      augmentedSections += `These are official security products. Recommend based on user's specific security needs (identity, endpoint, etc.):\n\n`;
+      securityProducts.slice(0, 5).forEach((product, index) => {
+        augmentedSections += `${index + 1}. **${product.name}**\n`;
+        augmentedSections += `   Vendor: ${product.vendor}\n`;
+        augmentedSections += `   Price: ${product.price ? `₹${product.price.toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}` : "Contact Sales"}\n`;
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+        if (link) augmentedSections += `   Link: ${link}\n`;
+        augmentedSections += `\n`;
+      });
+      augmentedSections += `=== END SECURITY SOLUTIONS ===\n\n`;
+    }
+  }
+
+  // ac) PRODUCTIVITY SEARCH
+  if (queryLower.includes('productivity') || queryLower.includes('office') || queryLower.includes('workplace') || queryLower.includes('collaboration')) {
+    const productivityProducts = products.filter(p =>
+      (p.subCategory || '').toLowerCase() === 'productivity' ||
+      (p.name || '').toLowerCase().includes('business') ||
+      (p.name || '').toLowerCase().includes('m365') ||
+      (p.name || '').toLowerCase().includes('office 365')
+    );
+    if (productivityProducts.length > 0) {
+      augmentedSections += `\n=== PRODUCTIVITY SOLUTIONS (${productivityProducts.length} products) ===\n`;
+      augmentedSections += `MANDATORY: These are the ONLY productivity products. Do NOT suggest Slack, Zoom, or Google Workspace as they are NOT in our marketplace.\n\n`;
+      productivityProducts.slice(0, 5).forEach((product, index) => {
+        augmentedSections += `${index + 1}. **${product.name}**\n`;
+        augmentedSections += `   Vendor: ${product.vendor}\n`;
+        augmentedSections += `   Price: ${product.price ? `₹${product.price.toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}` : "Contact Sales"}\n`;
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+        if (link) augmentedSections += `   Link: ${link}\n`;
+        augmentedSections += `\n`;
+      });
+      augmentedSections += `=== END PRODUCTIVITY SOLUTIONS ===\n\n`;
+    }
+  }
+
+  // ad) ADD-ON / LICENSE SEARCH
+  if (queryLower.includes('addon') || queryLower.includes('add-on') || queryLower.includes('licence') || queryLower.includes('license') || queryLower.includes('additional')) {
+    const addonProducts = products.filter(p =>
+      (p.name || '').toLowerCase().includes('add on') ||
+      (p.name || '').toLowerCase().includes('add-on') ||
+      (p.name || '').toLowerCase().includes('storage') ||
+      (p.name || '').toLowerCase().includes('premium') ||
+      (p.name || '').toLowerCase().includes('defender') ||
+      (p.name || '').toLowerCase().includes('protection')
+    );
+    if (addonProducts.length > 0) {
+      augmentedSections += `\n=== RECOMMENDED ADD-ONS & LICENSES (${addonProducts.length} products) ===\n`;
+      augmentedSections += `Use these products when the user asks for "add-ons" or "additional licenses":\n\n`;
+      addonProducts.slice(0, 5).forEach((product, index) => {
+        augmentedSections += `${index + 1}. **${product.name}**\n`;
+        augmentedSections += `   Vendor: ${product.vendor}\n`;
+        augmentedSections += `   Price: ${product.price ? `₹${product.price.toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}` : "Contact Sales"}\n`;
+        const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+        if (link) augmentedSections += `   Link: ${link}\n`;
+        augmentedSections += `\n`;
+      });
+      augmentedSections += `=== END ADD-ONS ===\n\n`;
+    }
+  }
+
   // a) BEST SELLING PRODUCTS
-  if (queryLower.includes('best selling') || queryLower.includes('top selling') || queryLower.includes('popular products')) {
+  if (queryLower.includes('best selling') || queryLower.includes('top selling') || queryLower.includes('popular products') || queryLower.includes('best seller')) {
     if (marketplaceSignals?.bestSelling && Array.isArray(marketplaceSignals.bestSelling)) {
       const bestSellingProducts = resolveProductsByIds(marketplaceSignals.bestSelling, products);
       if (bestSellingProducts.length > 0) {
         augmentedSections += `\n=== TOP SELLING / BEST SELLING PRODUCTS (${bestSellingProducts.length} products) ===\n`;
-        augmentedSections += `These are the best selling products in SkySecure Marketplace based on marketplace signals:\n\n`;
-        bestSellingProducts.forEach((product, index) => {
+        augmentedSections += `These are the best selling products in SkySecure Marketplace. Recommend exactly 3 products:\n\n`;
+        bestSellingProducts.slice(0, 3).forEach((product, index) => {
           augmentedSections += `${index + 1}. **${product.name}**\n`;
           augmentedSections += `   Vendor: ${product.vendor}\n`;
           augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
           augmentedSections += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+          const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+          if (link) augmentedSections += `   Link: ${link}\n`;
           if (product.description) {
             augmentedSections += `   Description: ${product.description.substring(0, 150)}...\n`;
           }
@@ -163,10 +371,65 @@ function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignal
     }
   }
 
+  // a2) FEATURED PRODUCTS
+  if (queryLower.includes('featured') || queryLower.includes('recommended products')) {
+    if (marketplaceSignals?.featured && Array.isArray(marketplaceSignals.featured)) {
+      const featuredProducts = resolveProductsByIds(marketplaceSignals.featured, products);
+      if (featuredProducts.length > 0) {
+        augmentedSections += `\n=== FEATURED PRODUCTS (${featuredProducts.length} products) ===\n`;
+        augmentedSections += `These are featured products hand-picked for our marketplace. Recommend exactly 3 products:\n\n`;
+        featuredProducts.slice(0, 3).forEach((product, index) => {
+          augmentedSections += `${index + 1}. **${product.name}**\n`;
+          augmentedSections += `   Vendor: ${product.vendor}\n`;
+          augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+          const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+          if (link) augmentedSections += `   Link: ${link}\n`;
+          augmentedSections += `\n`;
+        });
+        augmentedSections += `=== END FEATURED PRODUCTS ===\n\n`;
+      }
+    }
+  }
+
+  // a3) RECENTLY ADDED PRODUCTS
+  if (queryLower.includes('recently added') || queryLower.includes('latest products') || queryLower.includes('new products')) {
+    if (marketplaceSignals?.recentlyAdded && Array.isArray(marketplaceSignals.recentlyAdded)) {
+      const recentlyAddedIds = marketplaceSignals.recentlyAdded.map(item => typeof item === 'object' ? item.productId || item.id : item);
+      const recentlyAddedProducts = resolveProductsByIds(recentlyAddedIds, products);
+      if (recentlyAddedProducts.length > 0) {
+        augmentedSections += `\n=== RECENTLY ADDED PRODUCTS (${recentlyAddedProducts.length} products) ===\n`;
+        augmentedSections += `These are the latest additions to the SkySecure Marketplace catalog. Recommend exactly 3 products:\n\n`;
+        recentlyAddedProducts.slice(0, 3).forEach((product, index) => {
+          augmentedSections += `${index + 1}. **${product.name}**\n`;
+          augmentedSections += `   Vendor: ${product.vendor}\n`;
+          augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+          const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+          if (link) augmentedSections += `   Link: ${link}\n`;
+          augmentedSections += `\n`;
+        });
+        augmentedSections += `=== END RECENTLY ADDED PRODUCTS ===\n\n`;
+      }
+    }
+  }
+
   // b) CATEGORY OVERVIEW
   if (queryLower.includes('categories') || queryLower.includes('domains') || queryLower.includes('segments') ||
     queryLower.includes('what categories') || queryLower.includes('list categories')) {
-    if (categoryRankings && Object.keys(categoryRankings).length > 0) {
+    if (Array.isArray(categoryRankings)) {
+      augmentedSections += `\n=== CATEGORY OVERVIEW ===\n`;
+      augmentedSections += `SkySecure Marketplace offers Software products under these main domains:\n\n`;
+      categoryRankings.forEach(cat => {
+        augmentedSections += `- **${cat.category || cat.name}**: ${cat.productCount || cat.count || 0} products\n`;
+        if (cat.subCategories || cat.subcategories) {
+          const subs = cat.subCategories || cat.subcategories;
+          subs.slice(0, 5).forEach(sub => {
+            augmentedSections += `  - ${sub.name}: ${sub.count} products\n`;
+          });
+          if (subs.length > 5) augmentedSections += `  - ... and ${subs.length - 5} more sub-categories\n`;
+        }
+      });
+      augmentedSections += `=== END CATEGORY OVERVIEW ===\n\n`;
+    } else if (categoryRankings && typeof categoryRankings === 'object') {
       augmentedSections += `\n=== CATEGORY OVERVIEW ===\n`;
       augmentedSections += `SkySecure Marketplace offers Software products under these domains:\n\n`;
       Object.entries(categoryRankings).forEach(([categoryName, productIds]) => {
@@ -177,29 +440,92 @@ function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignal
     }
   }
 
-  // c) CATEGORY-SPECIFIC QUERIES
-  if (categoryRankings) {
-    for (const [categoryName, productIds] of Object.entries(categoryRankings)) {
+  // c) CATEGORY-SPECIFIC QUERIES (Enhanced for Hierarchical Data)
+  if (Array.isArray(categoryRankings)) {
+    for (const cat of categoryRankings) {
+      const categoryName = cat.category || cat.name;
       const categoryLower = categoryName.toLowerCase();
-      // Check if query mentions this category (case-insensitive)
-      if (queryLower.includes(categoryLower) ||
-        queryLower.includes(categoryName.toLowerCase().replace(/\s+/g, '-'))) {
-        if (Array.isArray(productIds) && productIds.length > 0) {
-          const categoryProducts = resolveProductsByIds(productIds, products);
+
+      // Check for main category match
+      if (queryLower.includes(categoryLower)) {
+        // Collect all product IDs in this category branch
+        let allIds = [];
+        if (cat.subCategories || cat.subcategories) {
+          const subs = cat.subCategories || cat.subcategories;
+          subs.forEach(sub => {
+            if (sub.productIds) allIds = allIds.concat(sub.productIds);
+            if (sub.subSubs || sub.subSubcategories) {
+              const subsubs = sub.subSubs || sub.subSubcategories;
+              subsubs.forEach(ss => {
+                if (ss.productIds) allIds = allIds.concat(ss.productIds);
+              });
+            }
+          });
+        }
+
+        if (allIds.length > 0) {
+          const categoryProducts = resolveProductsByIds([...new Set(allIds)], products);
           if (categoryProducts.length > 0) {
             augmentedSections += `\n=== PRODUCTS IN CATEGORY: ${categoryName} (${categoryProducts.length} products) ===\n`;
-            augmentedSections += `These are all products in the ${categoryName} category:\n\n`;
-            categoryProducts.forEach((product, index) => {
+            augmentedSections += `Provide exactly 3 recommendations from this list:\n\n`;
+            categoryProducts.slice(0, 5).forEach((product, index) => {
               augmentedSections += `${index + 1}. **${product.name}**\n`;
               augmentedSections += `   Vendor: ${product.vendor}\n`;
               augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
-              if (product.description) {
-                augmentedSections += `   Description: ${product.description.substring(0, 150)}...\n`;
-              }
+              const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+              if (link) augmentedSections += `   Link: ${link}\n`;
               augmentedSections += `\n`;
             });
             augmentedSections += `=== END PRODUCTS IN CATEGORY: ${categoryName} ===\n\n`;
-            break; // Only process first matching category
+          }
+        }
+      }
+
+      // Check for sub-category match
+      const subs = cat.subCategories || cat.subcategories || [];
+      for (const sub of subs) {
+        const subName = (sub.name || '').toLowerCase();
+        const subId = sub._id || sub.id;
+
+        // Match sub-category
+        const isSubMatch = queryLower.includes(subName) || (intentInfo?.subCategoryId === subId);
+
+        // Match sub-sub-categories
+        const subSubs = sub.subSubs || sub.subSubcategories || [];
+        const matchingSubSub = subSubs.find(ss =>
+          queryLower.includes((ss.name || '').toLowerCase()) ||
+          (intentInfo?.subCategoryId === (ss._id || ss.id))
+        );
+
+        if (isSubMatch || matchingSubSub) {
+          // Collect product IDs specifically for the match if possible
+          let targetIds = [];
+          if (matchingSubSub && matchingSubSub.productIds) {
+            targetIds = matchingSubSub.productIds;
+            augmentedSections += `\n=== PRODUCTS IN ${matchingSubSub.name.toUpperCase()} (${targetIds.length} products) ===\n`;
+          } else {
+            targetIds = sub.productIds || [];
+            if (subSubs.length > 0) {
+              subSubs.forEach(ss => { if (ss.productIds) targetIds = targetIds.concat(ss.productIds); });
+            }
+            augmentedSections += `\n=== PRODUCTS IN ${sub.name.toUpperCase()} (${targetIds.length} products) ===\n`;
+          }
+
+          if (targetIds.length > 0) {
+            const subProducts = resolveProductsByIds([...new Set(targetIds)], products);
+            if (subProducts.length > 0) {
+              augmentedSections += `MANDATORY: Use the FULL name associated with the price. Do NOT truncate product names.\n`;
+              augmentedSections += `Provide exactly 3 recommendations from this list:\n\n`;
+              subProducts.slice(0, 5).forEach((product, index) => {
+                augmentedSections += `${index + 1}. **${product.name}**\n`;
+                augmentedSections += `   Vendor: ${product.vendor}\n`;
+                augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+                const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+                if (link) augmentedSections += `   Link: ${link}\n`;
+                augmentedSections += `\n`;
+              });
+              augmentedSections += `=== END PRODUCTS ===\n\n`;
+            }
           }
         }
       }
@@ -207,7 +533,28 @@ function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignal
   }
 
   // d) OEM / VENDOR QUERIES
-  if (oemRankings) {
+  if (Array.isArray(oemRankings)) {
+    for (const oem of oemRankings) {
+      const oemName = oem.oem || oem.name;
+      const oemLower = oemName.toLowerCase();
+      if (queryLower.includes(oemLower) || queryLower.includes(`${oemLower} products`)) {
+        const oemProducts = resolveProductsByIds(oem.productIds || [], products);
+        if (oemProducts.length > 0) {
+          augmentedSections += `\n=== PRODUCTS BY OEM/VENDOR: ${oemName} (${oemProducts.length} products) ===\n`;
+          oemProducts.slice(0, 3).forEach((product, index) => {
+            augmentedSections += `${index + 1}. **${product.name}**\n`;
+            augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
+            augmentedSections += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+            const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+            if (link) augmentedSections += `   Link: ${link}\n`;
+            augmentedSections += `\n`;
+          });
+          augmentedSections += `=== END PRODUCTS BY OEM/VENDOR: ${oemName} ===\n\n`;
+          break;
+        }
+      }
+    }
+  } else if (oemRankings && typeof oemRankings === 'object') {
     for (const [oemName, productIds] of Object.entries(oemRankings)) {
       const oemLower = oemName.toLowerCase();
       // Check if query mentions this OEM/vendor (case-insensitive)
@@ -219,10 +566,12 @@ function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignal
           if (oemProducts.length > 0) {
             augmentedSections += `\n=== PRODUCTS BY OEM/VENDOR: ${oemName} (${oemProducts.length} products) ===\n`;
             augmentedSections += `These are all products from ${oemName}:\n\n`;
-            oemProducts.forEach((product, index) => {
+            oemProducts.slice(0, 3).forEach((product, index) => {
               augmentedSections += `${index + 1}. **${product.name}**\n`;
               augmentedSections += `   Price: ₹${(product.price || 0).toLocaleString('en-IN')}/${product.billingCycle || "Monthly"}\n`;
               augmentedSections += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+              const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+              if (link) augmentedSections += `   Link: ${link}\n`;
               if (product.description) {
                 augmentedSections += `   Description: ${product.description.substring(0, 150)}...\n`;
               }
@@ -238,6 +587,7 @@ function augmentKnowledgeBaseWithSignals(queryLower, products, marketplaceSignal
 
   return augmentedSections;
 }
+
 
 // Chatbot endpoint
 app.post("/api/chat", async (req, res) => {
@@ -301,11 +651,12 @@ app.post("/api/chat", async (req, res) => {
     // Await intent resolution early as it's needed for stage inference
     const intentInfo = await intentPromise;
 
-    // FAST TRACK: Handle greetings and off-topic questions quickly... (logic continues)
+    // FAST TRACK: Handle greetings and off-topic questions quickly...
     const greeting = isGreeting(message);
     const domainRelated = isDomainRelated(message, intentInfo);
 
-    if (greeting || !domainRelated) {
+    // Only fast-track if it's a greeting WITH NO domain intent, or if it's off-topic
+    if ((greeting && !domainRelated) || !domainRelated) {
       console.log(`⚡ Fast-tracking ${greeting ? 'greeting' : 'off-topic'} response`);
 
       // Fetch user tenant context for fast-track responses too (non-blocking)
@@ -324,7 +675,7 @@ app.post("/api/chat", async (req, res) => {
 
       const fastSystemPrompt = `You are a helpful virtual assistant for SkySecure Marketplace.
       ${greeting ? 'The user just said hello. Respond with a warm, professional greeting and briefly ask how you can help them with software or IT needs.' : 'The user asked something outside the scope of software and IT. Politely inform them that you specialize in SkySecure Marketplace products and services.'}
-      ${fastUserTenantContext ? `\n\nUSER'S TENANT INFORMATION:\n${fastUserTenantContext}\n\nIf the user asks about their licenses or subscriptions, use the information above.` : ''}
+      ${fastUserTenantContext ? `\n\nUSER'S TENANT INFORMATION:\n${fastUserTenantContext}\n\nIf the user asks about their licenses, subscriptions, or what they currently own, you MUST provide the specific details from the "USER'S ACTIVE SUBSCRIPTIONS" list above. List Product Name, SKU, and available counts.` : ''}
       Format your response with markdown and keep it concise.`;
 
       const fastMessages = [
@@ -341,16 +692,30 @@ app.post("/api/chat", async (req, res) => {
       const response = await makeRequest(apiUrl, {
         method: 'POST',
         headers: { "api-key": AZURE_OPENAI_API_KEY, "Content-Type": "application/json" },
-        body: { messages: fastMessages, temperature: 0.7, max_tokens: 500 }
+        body: {
+          messages: fastMessages,
+          temperature: 0.7,
+          max_tokens: 1500 // Increased from 500 to prevent truncation
+        }
       });
 
       const responseData = await response.json();
       const botResponse = responseData.choices[0]?.message?.content || "How can I help you today?";
 
+      // Diagnostic for truncation in fast-track
+      if (responseData.choices?.[0]?.finish_reason === 'length') {
+        console.warn("⚠️  Fast-track response was truncated due to length!");
+      }
+
       return res.json({
         success: true,
         message: botResponse,
-        quickReplies: greeting ? [{ text: "Show Best Sellers", value: "best_selling" }, { text: "Browse Categories", value: "categories" }] : [],
+        quickReplies: greeting ? [
+          { text: "Show Best Sellers", value: "Show best selling products" },
+          { text: "Browse Categories", value: "What are the categories?" },
+          { text: "Recently Added", value: "What are recently added products?" },
+          { text: "Featured Products", value: "Show featured products" }
+        ] : [],
         conversationStage: "Discovery"
       });
     }
@@ -427,21 +792,23 @@ app.post("/api/chat", async (req, res) => {
     // }
 
     let products = productsFromJSON || [];
-    const { categoryRankings, oemRankings } = (marketplaceSignals || {});
+    const signalsData = marketplaceSignals?.marketplaceSignals || {};
+    const categoryRankings = marketplaceSignals?.categoryRankings || [];
+    const oemRankings = marketplaceSignals?.oemRankings || [];
 
     // Await semantic search result
     relevantContent = await relevantContentPromise;
 
     // Enrich products with cached signals (Optimized)
-    if (marketplaceSignals) {
-      if (marketplaceSignals.bestSelling) {
-        resolveProductsByIds(marketplaceSignals.bestSelling, products).forEach(p => p.isTopSelling = true);
+    if (signalsData) {
+      if (signalsData.bestSelling) {
+        resolveProductsByIds(signalsData.bestSelling, products).forEach(p => p.isTopSelling = true);
       }
-      if (marketplaceSignals.featured) {
-        resolveProductsByIds(marketplaceSignals.featured, products).forEach(p => p.isFeatured = true);
+      if (signalsData.featured) {
+        resolveProductsByIds(signalsData.featured, products).forEach(p => p.isFeatured = true);
       }
-      if (marketplaceSignals.recentlyAdded) {
-        const recentlyAddedIds = marketplaceSignals.recentlyAdded.map(item => typeof item === 'object' ? item.productId : item);
+      if (signalsData.recentlyAdded) {
+        const recentlyAddedIds = signalsData.recentlyAdded.map(item => typeof item === 'object' ? (item.productId || item.id) : item);
         resolveProductsByIds(recentlyAddedIds, products).forEach(p => p.isLatest = true);
       }
     }
@@ -453,6 +820,8 @@ app.post("/api/chat", async (req, res) => {
     if (queryLower.includes('email') || queryLower.includes('exchange') || queryLower.includes('outlook')) searchTerms.push('Email');
     if (queryLower.includes('power bi')) searchTerms.push('Power BI');
     if (queryLower.includes('power automate')) searchTerms.push('Power Automate');
+    if (queryLower.includes('ai ') || queryLower.includes('artificial intelligence') || queryLower.includes('copilot')) searchTerms.push('Artificial Intelligence');
+    if (queryLower.includes('video') || queryLower.includes('conference') || queryLower.includes('meeting')) searchTerms.push('Video Conferencing');
 
     // Group products for formatting
     const productsByCategory = {};
@@ -487,9 +856,10 @@ app.post("/api/chat", async (req, res) => {
     const augmentedSections = augmentKnowledgeBaseWithSignals(
       queryLower,
       products,
-      marketplaceSignals,
+      signalsData,
       categoryRankings,
-      oemRankings
+      oemRankings,
+      intentInfo
     );
 
     if (augmentedSections) {
@@ -510,29 +880,75 @@ app.post("/api/chat", async (req, res) => {
 
     const systemPrompt = `You are a helpful, friendly, and visually-oriented virtual assistant for SkySecure Marketplace (Official URL: ${baseUrl}), similar to Amazon's Rufus. Your role is to help customers with questions about products, services, pricing, and general inquiries.
 
-⛔ OUT OF SCOPE / OFF-TOPIC QUESTIONS:
-If the user asks about topics COMPLETELY UNRELATED to:
-- Software products, IT, cloud services, security, or technology
-- SkySecure Marketplace features, pricing, or support
-- General business/enterprise software inquiries
-
-(Examples of off-topic: "How's the weather?", "Who won the cricket match?", "Write a poem about cats", "Solve this math problem", "politics", "movies", etc.)
-
-YOU MUST RESPOND WITH:
-"I am the SkySecure Marketplace assistant. I can only help you with questions about our software products, services, and features. How can I assist you with your IT or software needs today?"
+IDENTIFICATION RULES:
+- When asked "who are you" or "what model are you", you MUST respond with: "I'm here to assist with SkySecure Marketplace products and services."
+- NEVER mention that you are a GPT model or developed by OpenAI unless explicitly challenged, even then pivot back to SkySecure.
+- Do NOT use technical names like GPT-4o in your introduction.
 
 DO NOT attempt to answer the off-topic question. politely decline and pivot back to the marketplace.
 
 IMPORTANT: Format all responses in a visually appealing way using markdown. Use clear headings, bullet points (NO TABLES), bold text, and proper spacing to make responses easy to read and engaging.
 
+=== SKYSECURE COMPANY INFORMATION (Always use these EXACT links) ===
+
+CONTACT DETAILS:
+- 📞 Phone: +91 73533 55526 (Mon–Fri, 9am–6pm IST)
+- 💬 WhatsApp: +91 7625043383 (https://wa.me/917353355526)
+- 📧 Email: sales@skysecure.ai
+- 🏢 Address: Sakti Statesman, Unit # G/M-06 & 07, Marathahalli - Sarjapur Outer Ring Rd, 7th Cross, Green Glen Layout, Ibbaluru, Bengaluru, Karnataka 560103
+- 🗺️ Directions: https://maps.google.com/?q=Sakti+Statesman+Unit+G+M+06+07+Marathahalli+Sarjapur+Outer+Ring+Rd+7th+Cross+Green+Glen+Layout+Ibbaluru+Bengaluru+Karnataka+560103
+
+COMPANY PAGES:
+- About Us: https://shop.skysecure.ai/about-us
+- Careers: https://skysecure.zohorecruit.in/jobs/Careers
+
+SUPPORT PAGES:
+- Contact Us: https://shop.skysecure.ai/contact-us
+- Order Status: https://shop.skysecure.ai/orders
+- Feedback / Reviews: https://shop.skysecure.ai/review
+
+LEGAL & POLICY PAGES:
+- Terms of Service: https://shop.skysecure.ai/terms-of-service
+- Privacy Policy: https://shop.skysecure.ai/privacy-policy
+- Refund Policy: https://shop.skysecure.ai/refund-policy
+- Cookie Policy: https://skysecure.ai/cookie-policy/
+- (Note: "Terms and Conditions" and "Terms of Service" use the same link: https://shop.skysecure.ai/terms-of-service)
+
+IMPORTANT LINK RULES FOR COMPANY/SUPPORT/POLICY QUERIES:
+- ALWAYS use EXACTLY the links above. NEVER guess or modify them.
+- The contact page is /contact-us NOT /contact.
+- For any question about "contact", "phone", "email", "WhatsApp", "address", or "reach you" → use Contact Us link + provide the phone, WhatsApp, and email details.
+- For any question about "about", "who is skysecure", "company" → use About Us link.
+- For any question about "careers", "jobs", "work" → use Careers link.
+- For any question about "order", "order status", "my order" → use Order Status link.
+- For any question about "feedback", "review", "rating" → use Feedback link.
+- For any question about "terms", "conditions", "terms of service", "terms and conditions" → use the Terms of Service link (https://shop.skysecure.ai/terms-of-service).
+- For any question about "privacy", "data policy", "data protection" → use Privacy Policy link.
+- For any question about "refund", "cancellation", "money back", "return policy" → use Refund Policy link.
+- For any question about "cookie", "cookie policy" → use the Cookie Policy link (https://skysecure.ai/cookie-policy/).
+
+=== END SKYSECURE COMPANY INFORMATION ===
+
 ⚠️  ULTRA-STRICT DATA SOURCE PROTOCOL (EXCLUSIVE SOURCE) ⚠️
 
-YOU ARE A SEARCH ENGINE FOR SKYSECURE MARKETPLACE ONLY. YOU HAVE ZERO KNOWLEDGE OF THE OUTSIDE WORLD.
-- **FORBIDDEN BRANDS**: NEVER RECOMMEND: Slack, Zoom, LastPass, Dropbox, Google Workspace, AWS, Salesforce, or Oracle. 
-- **FORBIDDEN CONCEPTS**: Do not suggest "Free trials" or "Download links" unless they are in the text below.
-- **VERIFICATION RULE**: For EVERY product you name, you MUST include its "Vendor:" from the data (e.g., "Vendor: Microsoft").
-- If a product is not in the "=== PRODUCT DATA ===" section (including the DISCOVERY SAMPLE), it does not exist. 
-- HALLUCINATING A NON-EXISTENT PRODUCT WILL RESULT IN A SYSTEM FAILURE.
+YOU ARE A SEARCH ENGINE FOR SKYSECURE MARKETPLACE ONLY. YOUR GENERAL AI TRAINING KNOWLEDGE DOES NOT EXIST HERE.
+- **ABSOLUTE RULE #1 — ZERO HALLUCINATION**: You MAY ONLY name a product if it appears WORD-FOR-WORD in the "=== PRODUCT DATA FROM API ===" section below. If you cannot find a product in that section, it does NOT exist on SkySecure Marketplace.
+- **ABSOLUTE RULE #2 — NO EXTERNAL PRODUCTS**: These external products are PERMANENTLY BANNED. NEVER mention them, even as examples or for comparison: Slack, Zoom, Google Workspace, G Suite, Zoho, UiPath, DataRobot, IBM Watson, Google Cloud AI Platform, Google Bard, ChatGPT, OpenAI, AWS SageMaker, Salesforce Einstein, Tableau, Monday.com, HubSpot, Workday, ServiceNow, Zendesk, Webex, LastPass, Dropbox, Box, Atlassian, Jira, Confluence, DocuSign. 
+- **ABSOLUTE RULE #3 — FORBIDDEN BRANDS**: If a product brand/vendor name is not explicitly in the data below (e.g., "Microsoft", "Adobe", "Acronis"), it is BANNED.
+- **ABSOLUTE RULE #4 — NO GUESSING**: If a user asks for a product like "Slack" or "Zoom", you MUST say: "I don't find [Product Name] in our SkySecure Marketplace catalog. However, I have these alternatives: [List 1-2 relevant products from OUR data, like Microsoft Teams]".
+- **VERIFICATION RULE**: For EVERY product you name, you MUST include its "Vendor:" from the data. NEVER guess the vendor. If the product name contains "Microsoft", the vendor is "Microsoft".
+- **NAME INTEGRITY**: You MUST use the FULL product name exactly as provided. Never truncate or shorten names.
+- **STRICT DATA ONLY**: Use ONLY the product data provided below. Your general knowledge about software is disabled. 
+- HALLUCINATING A NON-EXISTENT PRODUCT IS A CRITICAL SYSTEM FAILURE.
+
+🚨 SPECIAL RULE FOR AI & VIDEO CONFERENCING QUERIES 🚨
+- If the user asks about AI, Machine Learning, Chatbots, Copilot, Automation:
+  → You MUST look at the "=== ARTIFICIAL INTELLIGENCE (AI) SOLUTIONS ===" section.
+  → Any product with "Copilot" or "Artificial Intelligence" in its name or category MUST be listed.
+- If the user asks about Video Conferencing, Meetings, Teams, Skype:
+  → You MUST look at the "=== VIDEO CONFERENCING SOLUTIONS ===" section.
+- NEVER suggest external products like Slack, Zoom, or ChatGPT.
+- If no products are found in these sections, check the generic listings before saying they are unavailable.
 
 MANDATORY DATA FETCH RULES:
 1. **PRIMARY SOURCE**: Products loaded from products_normalized.json file.
@@ -597,30 +1013,51 @@ ${userTenantContext ? `\n${userTenantContext}\n` : ''}
 
 PERSONALIZATION INSTRUCTIONS:
 ${userTenantContext ? `
-The user has connected their Microsoft 365 tenant to SkySecure. You have access to their current subscription and license information above.
+The user has connected their Microsoft 365 tenant to SkySecure. You have access to their current subscription and license information in the "USER'S MICROSOFT 365 TENANT INFORMATION" section.
 
-When the user asks questions like:
-- "What licenses do I have?"
-- "How many licenses are available?"
-- "What products am I subscribed to?"
-- "What's my license status?"
-- "Show me my subscriptions"
+### LISTING EXISTING LICENSES:
+- If the user asks "show me my licenses", "tell me my existing licens", "what are my current plans", "what do I already have", or any question about their CURRENT subscriptions, you MUST look at the "USER'S ACTIVE SUBSCRIPTIONS" section above.
+- You MUST provide a detailed list of all their active subscriptions found in the tenant data.
+- For each item, list: Product Name, SKU Part Number, and License Status (Available / Enabled).
+- If the tenant information says the connection is expired or data is missing, politely explain that and ask them to reconnect.
+- Format this as a professional point-wise list.
 
-You MUST:
-1. Reference the "USER'S MICROSOFT 365 TENANT INFORMATION" section above
-2. Provide accurate information about their current subscriptions, license counts, and status
-3. Use the exact subscription names, SKU part numbers, and license counts from the data above
-4. If they ask about a specific product, check if they have it in their subscriptions
-5. Be helpful and explain their license status clearly
+### DEFINITION OF A VALID RECOMMENDATION:
+A license qualifies as a valid recommendation ONLY if:
+1. It **directly enhances or extends** a product the user already owns (e.g., adding "Defender for Office 365 Plan 2" for an existing "Business Basic" user).
+2. It **unlocks a capability** NOT already included in their current licenses (e.g., adding "Audio Conferencing" to a standard Teams user).
+3. It does **NOT replace, downgrade, or duplicate** an existing license.
+4. It has a **logical product relationship** with existing subscriptions (e.g., advising "Premium Per User" for a Power BI Standard user).
+5. It solves a **real capacity or feature gap**.
 
-If the user asks about purchasing additional licenses or products they don't have, you can:
-- Show them available products from the marketplace
-- Compare their current subscriptions with available options
-- Help them understand what additional licenses they might need
+### STRICTLY DO NOT (FORBIDDEN):
+- DO NOT recommend alternative base SKUs (e.g., don't suggest moving from M365 Business to G-Suite).
+- DO NOT recommend parallel security bundles that compete with what they have.
+- DO NOT recommend licenses unrelated to their current vertical (e.g., don't suggest Dynamics to a pure Security user unless asked).
+- DO NOT recommend SKUs that overlap with features already included in their current tiers (e.g., don't suggest "Intune" if they have M365 Business Premium which already includes it).
+- DO NOT suggest generic upsells without identifying a verified connection to their owned product.
 
-IMPORTANT: Always use the user's actual subscription data from the "USER'S MICROSOFT 365 TENANT INFORMATION" section when answering questions about their licenses or subscriptions.
+### RECOMMENDATION FLOW:
+1. **Analyze** the user's existing licenses from the tenant data first.
+2. **Identify** enhancement paths within the same product family (e.g., Security, Collaboration, Storage, AI).
+3. **Recommend ONE logically connected add-on at a time** to avoid overwhelming the user.
+4. **Mandatory Explanation Structure**: For every recommendation, you MUST clearly state:
+    - **Product**: [**Full Product Name**](URL_from_data) | 🏢 **Vendor**: [Vendor]
+    - **Existing license it enhances**: [Name of owned license]
+    - **New capability it unlocks**: [Specific feature/benefit]
+    - **Why it does not overlap**: [Verification that it is an add-on, not a duplication]
+
+CRITICAL: If you cannot find a product link in the data, DO NOT recommend it. Every single product mention MUST be a clickable link.
+
+### RESPONSE RULES:
+- If the user asks for recommendations, follow the flow above.
+- If the user asks for their "existing licenses" or "current subscriptions", list the data from the tenant information section.
+- Use the exact subscription names from the marketplace data.
+- Always include the direct link and vendor for any recommended add-on.
+
+IMPORTANT: Always prioritize the user's actual subscription data from the "USER'S MICROSOFT 365 TENANT INFORMATION" section to answer questions about what they currently own.
 ` : `
-The user has not connected their Microsoft 365 tenant or is not authenticated. You cannot provide personalized license information. If they ask about their licenses, politely inform them that they need to connect their tenant to SkySecure to view their subscription information.
+The user has not connected their Microsoft 365 tenant. You cannot list their existing licenses or provide personalized recommendations. Politely invite them to connect their tenant via the "Connect Tenant" button in the dashboard to access their active subscriptions and receive tailored upgrade paths.
 `}
 
 ${relevantContent ? `SEMANTIC SEARCH RESULTS (Most relevant products for this query):
@@ -668,11 +1105,11 @@ IMPORTANT: The sections are clearly marked with headers like:
 ABSOLUTE REQUIREMENT: When a user asks about categories, sub-categories, featured products, best selling products, or recently added products, you MUST look at the data provided below. If the data shows products exist, you MUST list them. DO NOT say "no products" or "no subcategories" if the data clearly shows they exist.
 
 EXAMPLES:
-- User asks "what are the categories in skysecure marketplace" → Look for "=== MARKETPLACE CATEGORY HIERARCHY ===" section. Show the FULL hierarchy:
-  * Main categories (e.g., "1. Software (X products)")
-  * Sub-categories under each main category (e.g., "   1.1 Cloud services (Y products)", "   1.2 Data Management (Z products)", etc.)
-  * Also mention OEMs from "=== ORIGINAL EQUIPMENT MANUFACTURERS (OEMs) ===" section
-- User asks "what are the sub categories in software" → Look for "=== MARKETPLACE CATEGORY HIERARCHY ===" section, find "Software" category, and list ALL its sub-categories (1.1, 1.2, 1.3, etc.)
+- User asks "what are the categories in skysecure marketplace" → Look for "=== MARKETPLACE CATEGORY HIERARCHY ===" section. 
+  * SHOW ONLY the top-level main categories (e.g., "1. Software").
+  * DO NOT list sub-categories for every main category at once.
+  * Instead, offer to show sub-categories for a specific main category of their choice.
+- User asks "what are the sub categories in software" → Look for "=== MARKETPLACE CATEGORY HIERARCHY ===" section, find "Software" category, and list its immediate sub-categories (e.g., "1.1 Productivity", "1.2 Security"). DO NOT list sub-sub-categories unless specifically asked.
 - User asks "what are recently added products" → Look for "=== RECENTLY ADDED PRODUCTS ===" section. If it shows "(X products)" where X > 0, list ALL products from that section with full details (name, vendor, price, category, description).
 - User asks "best selling products" → Look for "=== TOP SELLING / BEST SELLING PRODUCTS ===" section. If it shows "(X products)" where X > 0, list ALL products from that section.
 - User asks "featured products" → Look for "=== FEATURED PRODUCTS ===" section. If it shows "(X products)" where X > 0, list ALL products from that section.
@@ -695,23 +1132,27 @@ GENERAL INSTRUCTIONS:
    - ALWAYS use vertical, point-wise lists.
    - For comparisons, use: ## [Product Name] > Bullet points for details.
 3. **MANDATORY CLICKABLE LINKS**: Every single time you mention a product name, you MUST make it a clickable markdown link using the EXACT URL from the "Link:" field in the data. Format: [**Product Name**](Direct_URL_From_Data).
+   - **DO NOT** use generic link text like "View Product", "Buy Now", or "Click here".
+   - **DO NOT** hide the link in a separate line if possible; the product name ITSELF must be the link.
 4. **PRODUCT LISTING FORMAT**:
-   1. [**Product Name**](Direct_URL_From_Data) | 🏢 **Vendor**: [Vendor] | 💰 **Price**: [All Available Prices Joined by " | "]
-      - 🏷️ **Category**: [Category]
+   1. [**Product Name**](Direct_URL_From_Data) | 🏢 **Vendor**: [Vendor] | 💰 **Price**: [Prices]
       - 📝 **Description**: [Brief 1-sentence description]
-5. **PRICING**: Format as ₹{amount}/{Cycle}. List ALL available cycles (Monthly, Yearly, 3-Year).
+5. **PRICING**: Format as ₹{amount}/{Cycle}.
 6. **STRICT LINK GUARDRAIL**: ONLY use URLs from the "Link:" field. NEVER guess or use "skysecuremarketplace.com". All official links start with "https://shop.skysecure.ai/".
 7. **CATEGORIES**: Organized in the "MARKETPLACE CATEGORY HIERARCHY" section. Use the exact hierarchy (1., 1.1, 1.2, etc.) and product counts provided.
 8. **ACCURACY**: Use EXACT names and prices from the provided JSON data.
 9. **CONCISE OUTPUT RULE (CRITICAL)**: 
-   - To ensure fast responses and avoid truncation, ONLY recommend up to **5 products** in a single message.
-   - If more products are relevant, list the top 5 and say: "I have X more suggestions, would you like to see them?"
+   - To ensure fast responses and maintain relevance, ONLY recommend exactly **3 products** in a single message.
+   - If there are fewer than 3 products in a specific sub-category, show all that are available.
+   - If there are more than 3 products, list the top 3 and say: "I have 3+ more suggestions, would you like to see them?"
    - Keep descriptions to 1 very brief sentence.
+   - **NAME INTEGRITY**: You MUST use the FULL product name exactly as provided. Never truncate "Microsoft Intune Plan 1 Storage Add-On" to "Microsoft Intune Plan 1". If the price is associated with a specific add-on or plan, use that full name.
+   - **RELEVANCE ONLY**: Only recommend products that strictly belong to the user's requested domain or category. Do NOT cross-recommend products from unrelated domains (e.g., do not recommend Power BI for Video Conferencing queries) unless the user explicitly asks for alternatives.
 
 CRITICAL: All data is fetched LIVE from the SkySecure Marketplace API. There are NO hard-coded responses. If data is missing, it means the API returned no data, and you must clearly communicate this to the user.
 
 IMPORTANT: Marketplace Signals Clarification:
-"Best selling" and "featured" products are derived marketplace signals based on catalog prominence and heuristics, not real-time sales or order data. These signals are computed from product metadata, category rankings, and marketplace analytics to identify products that are likely to be popular or noteworthy.
+"Best selling" and "featured" products are derived marketplace signals. ONLY label a product as "Best Selling" or "Featured" if it appears in the "=== TOP SELLING / BEST SELLING PRODUCTS ===" or "=== FEATURED PRODUCTS ===" sections respectively. NEVER assume a product is a best seller if it's not marked as such in these sections.
 
 ABSOLUTE GUARDRAILS:
 1. NEVER say "no products found" unless semantic search returns no results AND no products found in category sections.
@@ -742,7 +1183,9 @@ MANDATORY CHECKLIST before answering:
   1. "=== SEMANTIC SEARCH RESULTS ===" section FIRST
   2. "=== EMAIL & COLLABORATION PRODUCTS ===" section (from JSON file)
 - Question about Data Management products? → Check "=== DATA MANAGEMENT PRODUCTS ===" section
-- **SANITY CHECK**: Before hitting send, look at your recommendations. Are you mentioning **GitHub**, **AWS**, or **Google**? If they are not in the "=== PRODUCT DATA ===" section below, you are hallucinating. REMOVE THEM.
+ - **SANITY CHECK**: Before hitting send, look at your recommendations. Are you mentioning **Zoom**, **GitHub**, **AWS**, **Webex**, **Google Meet**, **UiPath**, **DataRobot**, **IBM Watson**, **Google Cloud AI**, **AWS SageMaker**, **Salesforce Einstein**, **HubSpot**, or **ServiceNow**? If they are not in the \"=== PRODUCT DATA FROM API ===\" section below with a direct \"Link:\", you are hallucinating. REMOVE THEM and replace with actual products from the data. 
+- **STRICT DATA ONLY**: Recommending products based on your general knowledge that are NOT in the marketplace data is FORBIDDEN. If we don't have it, say "I don't find that specific product in our marketplace right now, but I have these alternatives: [List 1-2 relevant products from our data]".
+- **DYNAMIC CATEGORIES**: Do NOT dump lists of categories. Be conversational. If a user asks for "Email", show Email subcategories only. If they haven't asked for categories, don't show them.
 
 10. **CONTEXTUAL CONTINUITY**: If a user clicks a button like "Compare Options", "Show Pricing", or "See Features" after you've provided an overview or list, they are referring to those specific products. You MUST use the conversation history to perform the requested action (Compare, Pricing, or Features) for the items you JUST mentioned. DO NOT ask for clarification; use the products from the previous bot message.
 
@@ -771,9 +1214,9 @@ ${stagePrompt}
     const recentHistory = conversationHistory.slice(-10);
     recentHistory.forEach((msg) => {
       let content = msg.text || "";
-      if (content.length > 1200) {
-        console.log(`✂️ Truncating long history message (${content.length} chars)`);
-        content = content.substring(0, 800) + "\n... [truncated for brevity] ...\n" + content.substring(content.length - 200);
+      if (content.length > 5000) {
+        console.log(`✂️ Truncating very long history message (${content.length} chars)`);
+        content = content.substring(0, 3500) + "\n... [truncated for brevity] ...\n" + content.substring(content.length - 1000);
       }
 
       messages.push({
@@ -808,7 +1251,7 @@ ${stagePrompt}
       },
       body: {
         messages: messages,
-        temperature: 0.7,
+        temperature: 0.1,
         max_tokens: 4096,
       },
       timeout: 120000, // 2-minute timeout per attempt
@@ -868,20 +1311,21 @@ ${stagePrompt}
       }
     });
 
-    // Regex: Splits the URL into [Slug] and optional [ID] using the last occurrence of '--'
-    // This flexible regex catches links even if they are truncated mid-slug or mid-ID
-    const linkRegex = /https:\/\/shop\.skysecure\.ai\/products\/([^\s"')]*)?(?:--)?([a-f0-9]+)?/gi;
+    // Regex: Extracts ID and optional slug from the end of a URL.
+    // Catches: .../products/slug--ID, .../products/product--ID, .../products/ID
+    const linkRegex = /https:\/\/shop\.skysecure\.ai\/products\/([^\s"')]*)?(?:--)?([a-f0-9]{10,24})/gi;
 
     fixedResponse = fixedResponse.replace(linkRegex, (fullMatch, slugCandidate, idCandidate) => {
-      // Avoid matching empty product base URL
-      if (!slugCandidate && !idCandidate) return fullMatch;
-
-      const slug = slugCandidate ? slugCandidate.toLowerCase() : '';
+      const slug = slugCandidate ? slugCandidate.toLowerCase().replace(/--$/, '') : '';
       const id = idCandidate ? idCandidate.toLowerCase() : '';
 
-      // 1. If ID is perfect and valid, keep it.
+      console.log(`🔍 Link Repair started for fragment: ${fullMatch} [ID: ${id}]`);
+
+      // 1. If we have a PERFECT 24-char ID, ALWAYS swap to the official full URL from our data.
+      // This prevents "product--ID" redirects if a better "slug--ID" URL exists in our JSON.
       if (id.length === 24 && validIdMap.has(id)) {
-        return fullMatch;
+        console.log(`   - Perfect ID match! Replacing with verified URL.`);
+        return validIdMap.get(id);
       }
 
       console.log(`🔍 Deep Link Repair started for fragment: ${fullMatch}`);
@@ -892,7 +1336,7 @@ ${stagePrompt}
         repairedUrl = slugMap.get(slug);
       }
 
-      // 3. Simple Slug / Alias / Fragment Match
+      // 3. Simple Slug / Alias / Fragment Match (STRICT)
       if (!repairedUrl && slug) {
         const slugParts = slug.split('--');
         const lastSegment = slugParts[slugParts.length - 1];
@@ -905,16 +1349,9 @@ ${stagePrompt}
 
         const target = aliasMap[lastSegment] || lastSegment;
 
+        // ONLY repair if we have a very high confidence match
         if (simpleSlugMap.has(target)) {
           repairedUrl = simpleSlugMap.get(target);
-        } else {
-          // Final Fuzzy Fallback for Fragments
-          for (const [validSimple, url] of simpleSlugMap.entries()) {
-            if (validSimple.startsWith(lastSegment) || lastSegment.startsWith(validSimple)) {
-              repairedUrl = url;
-              break;
-            }
-          }
         }
       }
 

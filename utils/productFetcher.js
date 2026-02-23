@@ -184,6 +184,26 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
     return name.includes('power bi');
   });
 
+  const aiProducts = products.filter(p => {
+    const name = (p.name || '').toLowerCase();
+    const desc = (p.description || '').toLowerCase();
+    const subCat = (p.subCategory || '').toLowerCase();
+    const subSubCat = (p.subSubCategory || '').toLowerCase();
+    return name.includes('copilot') ||
+      name.includes('artificial intelligence') ||
+      subCat.includes('artificial intelligence') ||
+      subSubCat.includes('artificial intelligence') ||
+      name.includes('defender threat intelligence');
+  });
+
+  const videoProducts = products.filter(p => {
+    const name = (p.name || '').toLowerCase();
+    const subCat = (p.subCategory || '').toLowerCase();
+    return name.includes('teams') ||
+      subCat.includes('video conferencing') ||
+      name.includes('skype');
+  });
+
   // Log SQL products found for debugging
   if (sqlProducts.length > 0) {
     console.log(`\n🔍 SQL PRODUCTS DETECTED: ${sqlProducts.length} products`);
@@ -209,8 +229,16 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `   ${product.name}\n`; // Duplicate name for search results format
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
-      if (product.category) knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      if (product.category) {
+        const cat = product.category;
+        const sub = (product.subCategory && product.subCategory !== product.category) ? product.subCategory : null;
+        const subSub = (product.subSubCategory && product.subSubCategory !== product.subCategory && product.subSubCategory !== product.category) ? product.subSubCategory : null;
+        let catDisplay = cat;
+        if (sub) catDisplay += ` > ${sub}`;
+        if (subSub) catDisplay += ` > ${subSub}`;
+        knowledgeBase += `   Category: ${catDisplay}\n`;
+      }
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
       if (link) {
         knowledgeBase += `   Link: ${link}\n`;
       }
@@ -256,7 +284,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
       if (link) {
         knowledgeBase += `   Link: ${link}\n`;
       }
@@ -280,7 +308,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
       if (link) {
         knowledgeBase += `   Link: ${link}\n`;
       }
@@ -292,14 +320,54 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
     knowledgeBase += `=== END POWER BI PRODUCTS ===\n\n`;
   }
 
+  // Add Artificial Intelligence products - CRITICAL SECTION
+  if (aiProducts.length > 0) {
+    knowledgeBase += `\n=== ARTIFICIAL INTELLIGENCE (AI) SOLUTIONS (${aiProducts.length} products) ===\n`;
+    knowledgeBase += `These are ALL AI-related products in SkySecure Marketplace. When a user asks about AI, list THESE products:\n\n`;
+    aiProducts.slice(0, 10).forEach((product, index) => {
+      knowledgeBase += `${index + 1}. **${product.name}**\n`;
+      knowledgeBase += `   Vendor: ${product.vendor}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
+      knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+      if (link) knowledgeBase += `   Link: ${link}\n`;
+      if (product.description) knowledgeBase += `   Description: ${product.description.substring(0, 100)}\n`;
+      knowledgeBase += `\n`;
+    });
+    knowledgeBase += `=== END ARTIFICIAL INTELLIGENCE (AI) SOLUTIONS ===\n\n`;
+  }
+
+  // Add Video Conferencing products - CRITICAL SECTION
+  if (videoProducts.length > 0) {
+    knowledgeBase += `\n=== VIDEO CONFERENCING SOLUTIONS (${videoProducts.length} products) ===\n`;
+    videoProducts.slice(0, 10).forEach((product, index) => {
+      knowledgeBase += `${index + 1}. **${product.name}**\n`;
+      knowledgeBase += `   Vendor: ${product.vendor}\n`;
+      knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
+      knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
+      if (link) knowledgeBase += `   Link: ${link}\n`;
+      if (product.description) knowledgeBase += `   Description: ${product.description.substring(0, 100)}\n`;
+      knowledgeBase += `\n`;
+    });
+    knowledgeBase += `=== END VIDEO CONFERENCING SOLUTIONS ===\n\n`;
+  }
+
   if (includeFullList) {
     // Add ALL products list (comprehensive)
     knowledgeBase += `\nALL PRODUCTS LIST:\n`;
     products.slice(0, 20).forEach((product, index) => {
       knowledgeBase += `${index + 1}. ${product.name} (${product.vendor})\n`;
-      knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
+      const cat = product.category;
+      const sub = (product.subCategory && product.subCategory !== product.category) ? product.subCategory : null;
+      const subSub = (product.subSubCategory && product.subSubCategory !== product.subCategory && product.subSubCategory !== product.category) ? product.subSubCategory : null;
+      let catDisplay = cat || 'Uncategorized';
+      if (sub) catDisplay += ` > ${sub}`;
+      if (subSub) catDisplay += ` > ${subSub}`;
+      knowledgeBase += `   Category: ${catDisplay}\n`;
+
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
-      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
       if (link) {
         knowledgeBase += `   Link: ${link}\n`;
       }
@@ -319,7 +387,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
-      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
       if (link) knowledgeBase += `   Link: ${link}\n`;
       if (product.description) knowledgeBase += `   Description: ${product.description.substring(0, 80)}...\n`;
       knowledgeBase += `\n`;
@@ -337,7 +405,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
       if (link) {
         knowledgeBase += `   Link: ${link}\n`;
       }
@@ -368,7 +436,7 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
       knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
       if (link) {
         knowledgeBase += `   Link: ${link}\n`;
       }
@@ -404,8 +472,15 @@ export function formatProductsForKnowledgeBase(products, includeFullList = false
       knowledgeBase += `${index + 1}. ${product.name}\n`;
       knowledgeBase += `   Vendor: ${product.vendor}\n`;
       knowledgeBase += `   Price: ${formatPriceDetails(product)}\n`;
-      knowledgeBase += `   Category: ${product.category}${product.subCategory ? ` > ${product.subCategory}` : ''}\n`;
-      const link = product.url || (product.id ? `https://shop.skysecure.ai/product/${product.id}` : null);
+      const cat = product.category;
+      const sub = (product.subCategory && product.subCategory !== product.category) ? product.subCategory : null;
+      const subSub = (product.subSubCategory && product.subSubCategory !== product.subCategory && product.subSubCategory !== product.category) ? product.subSubCategory : null;
+      let catDisplay = cat || 'Uncategorized';
+      if (sub) catDisplay += ` > ${sub}`;
+      if (subSub) catDisplay += ` > ${subSub}`;
+      knowledgeBase += `   Category: ${catDisplay}\n`;
+
+      const link = product.url || (product.id ? `https://shop.skysecure.ai/products/product--${product.id}` : null);
       if (link) {
         knowledgeBase += `   Link: ${link}\n`;
       }
